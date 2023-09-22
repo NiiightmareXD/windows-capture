@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use log::error;
 use parking_lot::Mutex;
 use thiserror::Error;
 use windows::{
@@ -110,8 +109,6 @@ impl WindowsCapture {
         _item.Closed(
             &TypedEventHandler::<GraphicsCaptureItem, IInspectable>::new({
                 move |_, _| {
-                    error!("Graphics Capture Item Closed Impossible to Continue Capturing");
-
                     trigger_item.lock().on_closed();
 
                     unsafe { PostQuitMessage(0) };

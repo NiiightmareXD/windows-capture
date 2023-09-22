@@ -1,4 +1,5 @@
 use log::warn;
+use thiserror::Error;
 use windows::{
     core::HSTRING,
     Graphics::Capture::GraphicsCaptureItem,
@@ -14,6 +15,15 @@ use windows::{
         },
     },
 };
+
+/// Used To Handle Internal Errors
+#[derive(Error, Debug)]
+pub enum WindowErrors {
+    #[error("Failed To Find Window")]
+    NotFound,
+    #[error("Unknown Error")]
+    Unknown,
+}
 
 /// Represents A Windows
 pub struct Window {
@@ -33,11 +43,15 @@ impl Window {
     }
 
     /// Create From A Window Name
-    pub fn from_window_name(title: &str) -> Self {
+    pub fn from_window_name(title: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let title = HSTRING::from(title);
         let window = unsafe { FindWindowW(None, &title) };
 
-        Self { window }
+        if window.0 == 0 {
+            return Err(Box::new(WindowErrors::NotFound));
+        }
+
+        Ok(Self { window })
     }
 
     /// Get Window Title
