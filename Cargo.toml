@@ -1,0 +1,38 @@
+[package]
+name = "windows-capture"
+version = "1.0.11"
+authors = ["NiiightmareXD"]
+edition = "2021"
+description = "Windows Capture Simple Screen Capture for Windows 🔥"
+documentation = "https://docs.rs/windows-capture"
+readme = "README.md"
+repository = "https://github.com/NiiightmareXD/windows-capture"
+license = "MIT"
+keywords = ["screen", "capture", "screenshot", "graphics", "windows"]
+categories = [
+    "os::windows-apis",
+    "api-bindings",
+    "graphics",
+    "gui",
+    "multimedia",
+]
+
+[dependencies]
+log = "0.4.20"
+parking_lot = "0.12.1"
+thiserror = "1.0.48"
+windows = { version = "0.51.1", features = [
+    "Foundation",
+    "Win32_System_Threading",
+    "Win32_Graphics_Direct3D",
+    "Graphics_Capture",
+    "Graphics_DirectX_Direct3D11",
+    "Win32_System_WinRT_Graphics_Capture",
+    "System",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_WinRT_Direct3D11",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+] }
