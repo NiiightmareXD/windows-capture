@@ -24,7 +24,7 @@ impl Monitor {
     }
 
     /// Create From A HMONITOR
-    pub fn from_hmonitor(monitor: HMONITOR) -> Self {
+    pub const fn from_hmonitor(monitor: HMONITOR) -> Self {
         Self { monitor }
     }
 
@@ -46,7 +46,7 @@ impl Monitor {
     }
 
     /// Get The Raw HMONITOR
-    pub fn get_raw_hmonitor(&self) -> HMONITOR {
+    pub const fn get_raw_hmonitor(&self) -> HMONITOR {
         self.monitor
     }
 

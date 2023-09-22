@@ -28,7 +28,7 @@ impl Window {
     }
 
     /// Crate From A HWND
-    pub fn from_hwnd(window: HWND) -> Self {
+    pub const fn from_hwnd(window: HWND) -> Self {
         Self { window }
     }
 
@@ -103,7 +103,7 @@ impl Window {
     }
 
     /// Get The Raw HWND
-    pub fn get_raw_hwnd(&self) -> HWND {
+    pub const fn get_raw_hwnd(&self) -> HWND {
         self.window
     }
 

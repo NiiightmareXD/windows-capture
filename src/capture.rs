@@ -3,10 +3,6 @@ use std::sync::Arc;
 use log::error;
 use parking_lot::Mutex;
 use thiserror::Error;
-use windows::Win32::System::WinRT::{
-    CreateDispatcherQueueController, DispatcherQueueOptions, RoInitialize, RoUninitialize,
-    DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, RO_INIT_MULTITHREADED,
-};
 use windows::{
     core::{ComInterface, IInspectable},
     Foundation::{AsyncActionCompletedHandler, TypedEventHandler},
@@ -19,7 +15,11 @@ use windows::{
             ID3D11Texture2D, D3D11_CPU_ACCESS_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ,
             D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
         },
-        System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess,
+        System::WinRT::{
+            CreateDispatcherQueueController, Direct3D11::IDirect3DDxgiInterfaceAccess,
+            DispatcherQueueOptions, RoInitialize, RoUninitialize, DQTAT_COM_NONE,
+            DQTYPE_THREAD_CURRENT, RO_INIT_MULTITHREADED,
+        },
         UI::WindowsAndMessaging::{
             DispatchMessageW, GetMessageW, PostQuitMessage, TranslateMessage, MSG,
         },
@@ -102,7 +102,7 @@ impl WindowsCapture {
         let session = frame_pool.CreateCaptureSession(&_item)?;
         let trigger = Arc::new(Mutex::new(trigger));
         let trigger_item = trigger.clone();
-        let trigger_frame_pool = trigger.clone();
+        let trigger_frame_pool = trigger;
 
         // Set CaptureItem Closed Event
         _item.Closed(
@@ -288,7 +288,8 @@ pub trait WindowsCaptureHandler: Sized {
         Ok(())
     }
 
-    /// Function That Will Be Called To Create The Struct The Flags Can Be Passed From Settigns
+    /// Function That Will Be Called To Create The Struct The Flags Can Be
+    /// Passed From Settigns
     fn new(flags: Self::Flags) -> Self;
 
     /// Called Every Time A New Frame Is Available
