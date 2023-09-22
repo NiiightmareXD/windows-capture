@@ -38,6 +38,8 @@ use super::{
 pub enum WindowsCaptureError {
     #[error("Graphics Capture API Is Not Supported")]
     Unsupported,
+    #[error("Already Started")]
+    AlreadyStarted,
     #[error("Unknown Error")]
     Unknown,
 }
@@ -71,8 +73,8 @@ where
 /// Internal Capture Struct
 pub struct WindowsCapture {
     _item: GraphicsCaptureItem,
-    frame_pool: Direct3D11CaptureFramePool,
-    session: GraphicsCaptureSession,
+    frame_pool: Option<Direct3D11CaptureFramePool>,
+    session: Option<GraphicsCaptureSession>,
     started: bool,
 }
 
@@ -94,7 +96,7 @@ impl WindowsCapture {
         let frame_pool = Direct3D11CaptureFramePool::Create(
             &device,
             DirectXPixelFormat::B8G8R8A8UIntNormalized,
-            1,
+            2,
             _item.Size()?,
         )?;
 
@@ -125,20 +127,15 @@ impl WindowsCapture {
             &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new({
                 move |frame, _| {
                     // Get Frame
-                    let frame = unsafe { frame.as_ref().unwrap_unchecked() };
-                    let frame = unsafe { frame.TryGetNextFrame().unwrap_unchecked() };
+                    let frame = frame.as_ref().unwrap();
+                    let frame = frame.TryGetNextFrame()?;
 
                     // Get Frame Surface
-                    let surface = unsafe { frame.Surface().unwrap_unchecked() };
+                    let surface = frame.Surface()?;
 
                     // Convert Surface To Texture
-                    let access = unsafe {
-                        surface
-                            .cast::<IDirect3DDxgiInterfaceAccess>()
-                            .unwrap_unchecked()
-                    };
-                    let texture =
-                        unsafe { access.GetInterface::<ID3D11Texture2D>().unwrap_unchecked() };
+                    let access = surface.cast::<IDirect3DDxgiInterfaceAccess>()?;
+                    let texture = unsafe { access.GetInterface::<ID3D11Texture2D>()? };
 
                     // Texture Settings
                     let mut texture_desc = D3D11_TEXTURE2D_DESC::default();
@@ -151,11 +148,9 @@ impl WindowsCapture {
                     // Create A Temp Texture To Process On
                     let mut texture_copy = None;
                     unsafe {
-                        d3d_device
-                            .CreateTexture2D(&texture_desc, None, Some(&mut texture_copy))
-                            .unwrap_unchecked();
+                        d3d_device.CreateTexture2D(&texture_desc, None, Some(&mut texture_copy))?
                     };
-                    let texture_copy = unsafe { texture_copy.unwrap_unchecked() };
+                    let texture_copy = texture_copy.unwrap();
 
                     // Copy The Real Texture To Temp Texture
                     unsafe { context.CopyResource(&texture_copy, &texture) };
@@ -163,15 +158,13 @@ impl WindowsCapture {
                     // Map The Texture To Enable CPU Access
                     let mut mapped_resource = D3D11_MAPPED_SUBRESOURCE::default();
                     unsafe {
-                        context
-                            .Map(
-                                &texture_copy,
-                                0,
-                                D3D11_MAP_READ,
-                                0,
-                                Some(&mut mapped_resource),
-                            )
-                            .unwrap_unchecked();
+                        context.Map(
+                            &texture_copy,
+                            0,
+                            D3D11_MAP_READ,
+                            0,
+                            Some(&mut mapped_resource),
+                        )?
                     };
 
                     // Create A Slice From The Bits
@@ -194,8 +187,8 @@ impl WindowsCapture {
 
         Ok(Self {
             _item,
-            frame_pool,
-            session,
+            frame_pool: Some(frame_pool),
+            session: Some(session),
             started: false,
         })
     }
@@ -205,27 +198,49 @@ impl WindowsCapture {
         capture_cursor: bool,
         draw_border: bool,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.started {
+            return Err(Box::new(WindowsCaptureError::AlreadyStarted));
+        }
+
         // Config
-        self.session.SetIsCursorCaptureEnabled(capture_cursor)?;
-        self.session.SetIsBorderRequired(draw_border)?;
+        self.session
+            .as_ref()
+            .unwrap()
+            .SetIsCursorCaptureEnabled(capture_cursor)?;
+        self.session
+            .as_ref()
+            .unwrap()
+            .SetIsBorderRequired(draw_border)?;
         self.started = true;
 
-        self.session.StartCapture()?;
         // Start Capture
+        self.session.as_ref().unwrap().StartCapture()?;
 
         Ok(())
     }
 
-    pub fn stop_capture(self) {}
+    pub fn stop_capture(mut self) {
+        // Stop Capturing
+        if let Some(frame_pool) = self.frame_pool.take() {
+            frame_pool.Close().expect("Failed to Close Frame Pool");
+        }
+
+        if let Some(session) = self.session.take() {
+            session.Close().expect("Failed to Close Frame Pool");
+        }
+    }
 }
 
 impl Drop for WindowsCapture {
     fn drop(&mut self) {
-        // Stop Capturing On Drop
-        self.frame_pool.Close().expect("Failed to Close Frame Pool");
-        self.session
-            .Close()
-            .expect("Failed to Close Graphics Capture Session");
+        // Stop Capturing
+        if let Some(frame_pool) = self.frame_pool.take() {
+            frame_pool.Close().expect("Failed to Close Frame Pool");
+        }
+
+        if let Some(session) = self.session.take() {
+            session.Close().expect("Failed to Close Frame Pool");
+        }
     }
 }
 
@@ -284,6 +299,9 @@ pub trait WindowsCaptureHandler: Sized {
 
         // Uninit WinRT
         unsafe { RoUninitialize() };
+
+        // Stop Capturing
+        capture.stop_capture();
 
         Ok(())
     }
