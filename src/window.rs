@@ -102,6 +102,15 @@ impl Window {
         Ok(windows)
     }
 
+    /// Wait Until The Window Is The Currently Active Foreground Window
+    pub fn activate(&self) {
+        loop {
+            if unsafe { GetForegroundWindow() } == self.window {
+                break;
+            }
+        }
+    }
+
     /// Get The Raw HWND
     pub const fn get_raw_hwnd(&self) -> HWND {
         self.window
