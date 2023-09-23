@@ -21,7 +21,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! windows-capture = "1.0.11"
+//! windows-capture = "1.0.17"
 //! ```
 //! or run this command
 //!
@@ -55,7 +55,7 @@
 //!         }
 //!     }
 //!
-//!     fn on_frame_arrived(&mut self, _frame: Frame) {
+//!     fn on_frame_arrived(&mut self, _frame: &Frame) {
 //!         self.fps += 1;
 //!
 //!         if self.last_output.elapsed().as_secs() >= 1 {
