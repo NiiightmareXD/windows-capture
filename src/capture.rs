@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use log::{info, warn};
 use parking_lot::Mutex;
 use thiserror::Error;
 use windows::{
@@ -10,9 +11,11 @@ use windows::{
         DirectX::DirectXPixelFormat,
     },
     Win32::{
-        Graphics::Direct3D11::{
-            ID3D11Texture2D, D3D11_CPU_ACCESS_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ,
-            D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
+        Graphics::{
+            Direct3D11::{
+                ID3D11Texture2D, D3D11_CPU_ACCESS_READ, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
+            },
+            Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
         },
         System::WinRT::{
             CreateDispatcherQueueController, Direct3D11::IDirect3DDxgiInterfaceAccess,
@@ -25,7 +28,7 @@ use windows::{
     },
 };
 
-use crate::monitor::Monitor;
+use crate::{d3d11::SendDirectX, monitor::Monitor};
 
 use super::{
     d3d11::{create_d3d_device, create_direct3d_device},
@@ -71,8 +74,7 @@ where
 
 /// Internal Capture Struct
 pub struct WindowsCapture {
-    _item: GraphicsCaptureItem,
-    frame_pool: Option<Direct3D11CaptureFramePool>,
+    frame_pool: Option<Arc<Direct3D11CaptureFramePool>>,
     session: Option<GraphicsCaptureSession>,
     started: bool,
 }
@@ -104,6 +106,8 @@ impl WindowsCapture {
         let trigger = Arc::new(Mutex::new(trigger));
         let trigger_item = trigger.clone();
         let trigger_frame_pool = trigger;
+        let frame_pool = Arc::new(frame_pool);
+        let device = SendDirectX::new(device);
 
         // Set CaptureItem Closed Event
         _item.Closed(
@@ -119,13 +123,19 @@ impl WindowsCapture {
         )?;
 
         // Set FramePool FrameArrived Event
-        let context = unsafe { d3d_device.GetImmediateContext()? };
         frame_pool.FrameArrived(
             &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new({
+                let context = unsafe { d3d_device.GetImmediateContext()? };
+                let frame_pool = frame_pool.clone();
+                let mut last_size = _item.Size()?;
+
                 move |frame, _| {
                     // Get Frame
                     let frame = frame.as_ref().unwrap();
                     let frame = frame.TryGetNextFrame()?;
+
+                    // Get Frame Content Size
+                    let frame_content_size = frame.ContentSize()?;
 
                     // Get Frame Surface
                     let surface = frame.Surface()?;
@@ -142,40 +152,32 @@ impl WindowsCapture {
                     texture_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
                     texture_desc.MiscFlags = 0;
 
-                    // Create A Temp Texture To Process On
-                    let mut texture_copy = None;
-                    unsafe {
-                        d3d_device.CreateTexture2D(&texture_desc, None, Some(&mut texture_copy))?
-                    };
-                    let texture_copy = texture_copy.unwrap();
+                    if texture_desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM {
+                        // Check If The Size Has Been Changed
+                        if frame_content_size.Width != last_size.Width
+                            || frame_content_size.Height != last_size.Height
+                        {
+                            info!("Size Changed Recreating Device");
+                            let device = &device;
+                            frame_pool
+                                .Recreate(
+                                    &device.inner,
+                                    DirectXPixelFormat::B8G8R8A8UIntNormalized,
+                                    2,
+                                    frame_content_size,
+                                )
+                                .unwrap();
 
-                    // Copy The Real Texture To Temp Texture
-                    unsafe { context.CopyResource(&texture_copy, &texture) };
+                            last_size = frame_content_size;
+                        } else {
+                            let frame = Frame::new(&surface, &d3d_device, &context);
 
-                    // Map The Texture To Enable CPU Access
-                    let mut mapped_resource = D3D11_MAPPED_SUBRESOURCE::default();
-                    unsafe {
-                        context.Map(
-                            &texture_copy,
-                            0,
-                            D3D11_MAP_READ,
-                            0,
-                            Some(&mut mapped_resource),
-                        )?
-                    };
-
-                    // Create A Slice From The Bits
-                    let slice: &[u8] = unsafe {
-                        std::slice::from_raw_parts(
-                            mapped_resource.pData as *const u8,
-                            (texture_desc.Height * mapped_resource.RowPitch) as usize,
-                        )
-                    };
-
-                    let frame = Frame::new(slice, texture_desc.Width, texture_desc.Height);
-
-                    // Send The Frame To Trigger Struct
-                    trigger_frame_pool.lock().on_frame_arrived(frame);
+                            // Send The Frame To Trigger Struct
+                            trigger_frame_pool.lock().on_frame_arrived(&frame);
+                        }
+                    } else {
+                        warn!("Wrong Pixel Type");
+                    }
 
                     Result::Ok(())
                 }
@@ -183,7 +185,6 @@ impl WindowsCapture {
         )?;
 
         Ok(Self {
-            _item,
             frame_pool: Some(frame_pool),
             session: Some(session),
             started: false,
@@ -294,11 +295,11 @@ pub trait WindowsCaptureHandler: Sized {
             }
         }
 
-        // Uninit WinRT
-        unsafe { RoUninitialize() };
-
         // Stop Capturing
         capture.stop_capture();
+
+        // Uninit WinRT
+        unsafe { RoUninitialize() };
 
         Ok(())
     }
@@ -308,7 +309,7 @@ pub trait WindowsCaptureHandler: Sized {
     fn new(flags: Self::Flags) -> Self;
 
     /// Called Every Time A New Frame Is Available
-    fn on_frame_arrived(&mut self, frame: Frame);
+    fn on_frame_arrived(&mut self, frame: &Frame);
 
     /// Called If The Capture Item Closed Usually When The Window Closes
     fn on_closed(&mut self);

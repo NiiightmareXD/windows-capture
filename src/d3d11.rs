@@ -15,6 +15,18 @@ use windows::{
     },
 };
 
+pub struct SendDirectX<T> {
+    pub inner: T,
+}
+
+impl<T> SendDirectX<T> {
+    pub fn new(device: T) -> Self {
+        Self { inner: device }
+    }
+}
+
+unsafe impl<T> Send for SendDirectX<T> {}
+
 pub fn create_d3d_device() -> Result<ID3D11Device, Box<dyn std::error::Error>> {
     // Try To Build A Hardware Device
     let mut d3d_device = None;
@@ -64,5 +76,6 @@ pub fn create_direct3d_device(
     let dxgi_device: IDXGIDevice = d3d_device.cast()?;
     let inspectable = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi_device)? };
     let device: IDirect3DDevice = inspectable.cast()?;
+
     Ok(device)
 }
