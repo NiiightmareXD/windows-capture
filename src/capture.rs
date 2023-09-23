@@ -81,7 +81,7 @@ pub struct WindowsCapture {
 
 impl WindowsCapture {
     pub fn new<T: WindowsCaptureHandler + std::marker::Send + 'static>(
-        _item: GraphicsCaptureItem,
+        item: GraphicsCaptureItem,
         trigger: T,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         // Check Support
@@ -98,11 +98,11 @@ impl WindowsCapture {
             &device,
             DirectXPixelFormat::B8G8R8A8UIntNormalized,
             2,
-            _item.Size()?,
+            item.Size()?,
         )?;
 
         // Init
-        let session = frame_pool.CreateCaptureSession(&_item)?;
+        let session = frame_pool.CreateCaptureSession(&item)?;
         let trigger = Arc::new(Mutex::new(trigger));
         let trigger_item = trigger.clone();
         let trigger_frame_pool = trigger;
@@ -110,7 +110,7 @@ impl WindowsCapture {
         let device = SendDirectX::new(device);
 
         // Set CaptureItem Closed Event
-        _item.Closed(
+        item.Closed(
             &TypedEventHandler::<GraphicsCaptureItem, IInspectable>::new({
                 move |_, _| {
                     trigger_item.lock().on_closed();
@@ -127,7 +127,7 @@ impl WindowsCapture {
             &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new({
                 let context = unsafe { d3d_device.GetImmediateContext()? };
                 let frame_pool = frame_pool.clone();
-                let mut last_size = _item.Size()?;
+                let mut last_size = item.Size()?;
 
                 move |frame, _| {
                     // Get Frame

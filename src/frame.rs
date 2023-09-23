@@ -29,7 +29,7 @@ pub struct Frame<'a> {
 
 impl<'a> Frame<'a> {
     /// Craete A New Frame
-    pub fn new(
+    pub const fn new(
         surface: &'a IDirect3DSurface,
         d3d_device: &'a ID3D11Device,
         context: &'a ID3D11DeviceContext,
@@ -94,7 +94,7 @@ impl<'a> Frame<'a> {
     }
 
     /// Get The Raw IDirect3DSurface
-    pub fn get_raw_surface(&self) -> &'a IDirect3DSurface {
+    pub const fn get_raw_surface(&self) -> &'a IDirect3DSurface {
         self.surface
     }
 }
