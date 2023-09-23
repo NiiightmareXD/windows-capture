@@ -1,6 +1,6 @@
 [package]
 name = "windows-capture"
-version = "1.0.17"
+version = "1.0.18"
 authors = ["NiiightmareXD"]
 edition = "2021"
 description = "Windows Capture Simple Screen Capture for Windows 🔥"
