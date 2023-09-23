@@ -49,7 +49,7 @@ impl WindowsCaptureHandler for Capture {
         }
     }
 
-    fn on_frame_arrived(&mut self, _frame: Frame) {
+    fn on_frame_arrived(&mut self, _frame: &Frame) {
         self.fps += 1;
 
         if self.last_output.elapsed().as_secs() >= 1 {
