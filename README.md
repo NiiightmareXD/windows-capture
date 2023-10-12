@@ -1,4 +1,5 @@
-# Windows Capture &emsp; ![Crates.io](https://img.shields.io/crates/l/windows-capture) ![GitHub Workflow Status (with event)](https://img.shields.io/github/actions/workflow/status/NiiightmareXD/windows-capture/rust.yml) ![Crates.io](https://img.shields.io/crates/v/windows-capture)
+# Windows Capture
+![Crates.io](https://img.shields.io/crates/l/windows-capture) ![GitHub Workflow Status (with event)](https://img.shields.io/github/actions/workflow/status/NiiightmareXD/windows-capture/rust.yml) ![Crates.io](https://img.shields.io/crates/v/windows-capture)
 
 **Windows Capture** is a highly efficient Rust library that enables you to effortlessly capture the screen using the Graphics Capture API. This library allows you to easily capture the screen of your Windows-based computer and use it for various purposes, such as creating instructional videos, taking screenshots, or recording your gameplay. With its intuitive interface and robust functionality, Windows-Capture is an excellent choice for anyone looking for a reliable and easy-to-use screen capturing solution.
 
