@@ -1,26 +1,19 @@
 use std::sync::Arc;
 
-use log::{info, warn};
+use log::info;
 use parking_lot::Mutex;
 use thiserror::Error;
 use windows::{
-    core::{ComInterface, IInspectable},
+    core::IInspectable,
     Foundation::{AsyncActionCompletedHandler, TypedEventHandler},
     Graphics::{
         Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession},
         DirectX::DirectXPixelFormat,
     },
     Win32::{
-        Graphics::{
-            Direct3D11::{
-                ID3D11Texture2D, D3D11_CPU_ACCESS_READ, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
-            },
-            Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
-        },
         System::WinRT::{
-            CreateDispatcherQueueController, Direct3D11::IDirect3DDxgiInterfaceAccess,
-            DispatcherQueueOptions, RoInitialize, RoUninitialize, DQTAT_COM_NONE,
-            DQTYPE_THREAD_CURRENT, RO_INIT_MULTITHREADED,
+            CreateDispatcherQueueController, DispatcherQueueOptions, RoInitialize, RoUninitialize,
+            DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, RO_INIT_MULTITHREADED,
         },
         UI::WindowsAndMessaging::{
             DispatchMessageW, GetMessageW, PostQuitMessage, TranslateMessage, MSG,
@@ -47,15 +40,33 @@ pub enum WindowsCaptureError {
 }
 
 /// Capture Settings
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub struct WindowsCaptureSettings<Flags> {
     /// Item That Can Be Created From Monitor Or Window
-    pub item: GraphicsCaptureItem,
+    item: GraphicsCaptureItem,
     /// Capture Mouse Cursor
-    pub capture_cursor: bool,
+    capture_cursor: bool,
     /// Draw Yellow Border Around Captured Window
-    pub draw_border: bool,
+    draw_border: bool,
     /// Flags To Pass To The New Function
-    pub flags: Flags,
+    flags: Flags,
+}
+
+impl<Flags> WindowsCaptureSettings<Flags> {
+    /// Create Capture Settings
+    pub fn new<T: Into<GraphicsCaptureItem>>(
+        item: T,
+        capture_cursor: bool,
+        draw_border: bool,
+        flags: Flags,
+    ) -> Self {
+        Self {
+            item: item.into(),
+            capture_cursor,
+            draw_border,
+            flags,
+        }
+    }
 }
 
 impl<Flags> Default for WindowsCaptureSettings<Flags>
@@ -73,6 +84,7 @@ where
 }
 
 /// Internal Capture Struct
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub struct WindowsCapture {
     frame_pool: Option<Arc<Direct3D11CaptureFramePool>>,
     session: Option<GraphicsCaptureSession>,
@@ -80,14 +92,21 @@ pub struct WindowsCapture {
 }
 
 impl WindowsCapture {
-    pub fn new<T: WindowsCaptureHandler + std::marker::Send + 'static>(
-        item: GraphicsCaptureItem,
+    /// Create A New Internal Capture Item
+    pub fn new<
+        T: WindowsCaptureHandler + std::marker::Send + 'static,
+        U: Into<GraphicsCaptureItem>,
+    >(
+        item: U,
         trigger: T,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         // Check Support
         if !GraphicsCaptureSession::IsSupported()? {
             return Err(Box::new(WindowsCaptureError::Unsupported));
         }
+
+        // Init Item
+        let item = item.into();
 
         // Create Device
         let d3d_device = create_d3d_device()?;
@@ -96,7 +115,7 @@ impl WindowsCapture {
         // Create Frame Pool
         let frame_pool = Direct3D11CaptureFramePool::Create(
             &device,
-            DirectXPixelFormat::B8G8R8A8UIntNormalized,
+            DirectXPixelFormat::R8G8B8A8UIntNormalized,
             2,
             item.Size()?,
         )?;
@@ -140,43 +159,33 @@ impl WindowsCapture {
                     // Get Frame Surface
                     let surface = frame.Surface()?;
 
-                    // Convert Surface To Texture
-                    let access = surface.cast::<IDirect3DDxgiInterfaceAccess>()?;
-                    let texture = unsafe { access.GetInterface::<ID3D11Texture2D>()? };
+                    // Check If The Size Has Been Changed
+                    if frame_content_size.Width != last_size.Width
+                        || frame_content_size.Height != last_size.Height
+                    {
+                        info!("Size Changed Recreating Device");
+                        let device = &device;
+                        frame_pool
+                            .Recreate(
+                                &device.inner,
+                                DirectXPixelFormat::R8G8B8A8UIntNormalized,
+                                2,
+                                frame_content_size,
+                            )
+                            .unwrap();
 
-                    // Texture Settings
-                    let mut texture_desc = D3D11_TEXTURE2D_DESC::default();
-                    unsafe { texture.GetDesc(&mut texture_desc) }
-                    texture_desc.Usage = D3D11_USAGE_STAGING;
-                    texture_desc.BindFlags = 0;
-                    texture_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
-                    texture_desc.MiscFlags = 0;
-
-                    if texture_desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM {
-                        // Check If The Size Has Been Changed
-                        if frame_content_size.Width != last_size.Width
-                            || frame_content_size.Height != last_size.Height
-                        {
-                            info!("Size Changed Recreating Device");
-                            let device = &device;
-                            frame_pool
-                                .Recreate(
-                                    &device.inner,
-                                    DirectXPixelFormat::B8G8R8A8UIntNormalized,
-                                    2,
-                                    frame_content_size,
-                                )
-                                .unwrap();
-
-                            last_size = frame_content_size;
-                        } else {
-                            let frame = Frame::new(&surface, &d3d_device, &context);
-
-                            // Send The Frame To Trigger Struct
-                            trigger_frame_pool.lock().on_frame_arrived(&frame);
-                        }
+                        last_size = frame_content_size;
                     } else {
-                        warn!("Wrong Pixel Type");
+                        let frame = Frame::new(
+                            &surface,
+                            &d3d_device,
+                            &context,
+                            frame_content_size.Width,
+                            frame_content_size.Height,
+                        );
+
+                        // Send The Frame To Trigger Struct
+                        trigger_frame_pool.lock().on_frame_arrived(&frame);
                     }
 
                     Result::Ok(())
@@ -191,6 +200,7 @@ impl WindowsCapture {
         })
     }
 
+    /// Start Internal Capture
     pub fn start_capture(
         &mut self,
         capture_cursor: bool,
@@ -217,6 +227,7 @@ impl WindowsCapture {
         Ok(())
     }
 
+    /// Stop Internal Capture
     pub fn stop_capture(mut self) {
         // Stop Capturing
         if let Some(frame_pool) = self.frame_pool.take() {

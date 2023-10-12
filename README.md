@@ -15,7 +15,7 @@ Add this library to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-windows-capture = "1.0.17"
+windows-capture = "1.0.19"
 ```
 or run this command
 
@@ -65,12 +65,7 @@ impl WindowsCaptureHandler for Capture {
 }
 
 fn main() {
-    let settings = WindowsCaptureSettings {
-        item: Window::get_foreground().into(),
-        capture_cursor: false,
-        draw_border: true,
-        flags: (),
-    };
+    let settings = WindowsCaptureSettings::new(Monitor::get_primary(), true, false, ());
 
     Capture::start(settings).unwrap();
 }
