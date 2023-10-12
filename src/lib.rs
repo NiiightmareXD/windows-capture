@@ -33,11 +33,10 @@
 //!
 //! ```no_run
 //! use std::time::Instant;
-//!
 //! use windows_capture::{
 //!     capture::{WindowsCaptureHandler, WindowsCaptureSettings},
 //!     frame::Frame,
-//!     window::Window,
+//!     monitor::Monitor,
 //! };
 //!
 //! struct Capture {
