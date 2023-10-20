@@ -1,257 +1,23 @@
-use std::sync::Arc;
-
-use log::info;
-use parking_lot::Mutex;
-use thiserror::Error;
+use log::{info, trace};
 use windows::{
-    core::IInspectable,
-    Foundation::{AsyncActionCompletedHandler, TypedEventHandler},
-    Graphics::{
-        Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession},
-        DirectX::DirectXPixelFormat,
-    },
+    Foundation::AsyncActionCompletedHandler,
     Win32::{
         System::WinRT::{
             CreateDispatcherQueueController, DispatcherQueueOptions, RoInitialize, RoUninitialize,
-            DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, RO_INIT_MULTITHREADED,
+            DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, RO_INIT_SINGLETHREADED,
         },
-        UI::WindowsAndMessaging::{
-            DispatchMessageW, GetMessageW, PostQuitMessage, TranslateMessage, MSG,
+        UI::{
+            HiDpi::{SetProcessDpiAwareness, PROCESS_PER_MONITOR_DPI_AWARE},
+            WindowsAndMessaging::{
+                DispatchMessageW, GetMessageW, PostQuitMessage, TranslateMessage, MSG,
+            },
         },
     },
 };
 
-use crate::{d3d11::SendDirectX, monitor::Monitor};
-
-use super::{
-    d3d11::{create_d3d_device, create_direct3d_device},
-    frame::Frame,
+use crate::{
+    frame::Frame, graphics_capture_api::GraphicsCaptureApi, settings::WindowsCaptureSettings,
 };
-
-/// Used To Handle Internal Errors
-#[derive(Error, Debug)]
-pub enum WindowsCaptureError {
-    #[error("Graphics Capture API Is Not Supported")]
-    Unsupported,
-    #[error("Already Started")]
-    AlreadyStarted,
-    #[error("Unknown Error")]
-    Unknown,
-}
-
-/// Capture Settings
-#[derive(Eq, PartialEq, Clone, Debug)]
-pub struct WindowsCaptureSettings<Flags> {
-    /// Item That Can Be Created From Monitor Or Window
-    item: GraphicsCaptureItem,
-    /// Capture Mouse Cursor
-    capture_cursor: bool,
-    /// Draw Yellow Border Around Captured Window
-    draw_border: bool,
-    /// Flags To Pass To The New Function
-    flags: Flags,
-}
-
-impl<Flags> WindowsCaptureSettings<Flags> {
-    /// Create Capture Settings
-    pub fn new<T: Into<GraphicsCaptureItem>>(
-        item: T,
-        capture_cursor: bool,
-        draw_border: bool,
-        flags: Flags,
-    ) -> Self {
-        Self {
-            item: item.into(),
-            capture_cursor,
-            draw_border,
-            flags,
-        }
-    }
-}
-
-impl<Flags> Default for WindowsCaptureSettings<Flags>
-where
-    Flags: Default,
-{
-    fn default() -> Self {
-        Self {
-            item: Monitor::get_primary().into(),
-            capture_cursor: false,
-            draw_border: false,
-            flags: Default::default(),
-        }
-    }
-}
-
-/// Internal Capture Struct
-#[derive(Eq, PartialEq, Clone, Debug)]
-pub struct WindowsCapture {
-    frame_pool: Option<Arc<Direct3D11CaptureFramePool>>,
-    session: Option<GraphicsCaptureSession>,
-    started: bool,
-}
-
-impl WindowsCapture {
-    /// Create A New Internal Capture Item
-    pub fn new<
-        T: WindowsCaptureHandler + std::marker::Send + 'static,
-        U: Into<GraphicsCaptureItem>,
-    >(
-        item: U,
-        trigger: T,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        // Check Support
-        if !GraphicsCaptureSession::IsSupported()? {
-            return Err(Box::new(WindowsCaptureError::Unsupported));
-        }
-
-        // Init Item
-        let item = item.into();
-
-        // Create Device
-        let d3d_device = create_d3d_device()?;
-        let device = create_direct3d_device(&d3d_device)?;
-
-        // Create Frame Pool
-        let frame_pool = Direct3D11CaptureFramePool::Create(
-            &device,
-            DirectXPixelFormat::R8G8B8A8UIntNormalized,
-            2,
-            item.Size()?,
-        )?;
-
-        // Init
-        let session = frame_pool.CreateCaptureSession(&item)?;
-        let trigger = Arc::new(Mutex::new(trigger));
-        let trigger_item = trigger.clone();
-        let trigger_frame_pool = trigger;
-        let frame_pool = Arc::new(frame_pool);
-        let device = SendDirectX::new(device);
-
-        // Set CaptureItem Closed Event
-        item.Closed(
-            &TypedEventHandler::<GraphicsCaptureItem, IInspectable>::new({
-                move |_, _| {
-                    trigger_item.lock().on_closed();
-
-                    unsafe { PostQuitMessage(0) };
-
-                    Result::Ok(())
-                }
-            }),
-        )?;
-
-        // Set FramePool FrameArrived Event
-        frame_pool.FrameArrived(
-            &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new({
-                let context = unsafe { d3d_device.GetImmediateContext()? };
-                let frame_pool = frame_pool.clone();
-                let mut last_size = item.Size()?;
-
-                move |frame, _| {
-                    // Get Frame
-                    let frame = frame.as_ref().unwrap();
-                    let frame = frame.TryGetNextFrame()?;
-
-                    // Get Frame Content Size
-                    let frame_content_size = frame.ContentSize()?;
-
-                    // Get Frame Surface
-                    let surface = frame.Surface()?;
-
-                    // Check If The Size Has Been Changed
-                    if frame_content_size.Width != last_size.Width
-                        || frame_content_size.Height != last_size.Height
-                    {
-                        info!("Size Changed Recreating Device");
-                        let device = &device;
-                        frame_pool
-                            .Recreate(
-                                &device.inner,
-                                DirectXPixelFormat::R8G8B8A8UIntNormalized,
-                                2,
-                                frame_content_size,
-                            )
-                            .unwrap();
-
-                        last_size = frame_content_size;
-                    } else {
-                        let frame = Frame::new(
-                            &surface,
-                            &d3d_device,
-                            &context,
-                            frame_content_size.Width,
-                            frame_content_size.Height,
-                        );
-
-                        // Send The Frame To Trigger Struct
-                        trigger_frame_pool.lock().on_frame_arrived(&frame);
-                    }
-
-                    Result::Ok(())
-                }
-            }),
-        )?;
-
-        Ok(Self {
-            frame_pool: Some(frame_pool),
-            session: Some(session),
-            started: false,
-        })
-    }
-
-    /// Start Internal Capture
-    pub fn start_capture(
-        &mut self,
-        capture_cursor: bool,
-        draw_border: bool,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if self.started {
-            return Err(Box::new(WindowsCaptureError::AlreadyStarted));
-        }
-
-        // Config
-        self.session
-            .as_ref()
-            .unwrap()
-            .SetIsCursorCaptureEnabled(capture_cursor)?;
-        self.session
-            .as_ref()
-            .unwrap()
-            .SetIsBorderRequired(draw_border)?;
-        self.started = true;
-
-        // Start Capture
-        self.session.as_ref().unwrap().StartCapture()?;
-
-        Ok(())
-    }
-
-    /// Stop Internal Capture
-    pub fn stop_capture(mut self) {
-        // Stop Capturing
-        if let Some(frame_pool) = self.frame_pool.take() {
-            frame_pool.Close().expect("Failed to Close Frame Pool");
-        }
-
-        if let Some(session) = self.session.take() {
-            session.Close().expect("Failed to Close Frame Pool");
-        }
-    }
-}
-
-impl Drop for WindowsCapture {
-    fn drop(&mut self) {
-        // Stop Capturing
-        if let Some(frame_pool) = self.frame_pool.take() {
-            frame_pool.Close().expect("Failed to Close Frame Pool");
-        }
-
-        if let Some(session) = self.session.take() {
-            session.Close().expect("Failed to Close Frame Pool");
-        }
-    }
-}
 
 /// Event Handler Trait
 pub trait WindowsCaptureHandler: Sized {
@@ -264,10 +30,16 @@ pub trait WindowsCaptureHandler: Sized {
     where
         Self: std::marker::Send + 'static,
     {
-        // Init WinRT
-        unsafe { RoInitialize(RO_INIT_MULTITHREADED)? };
+        // Initialize WinRT
+        trace!("Initializing WinRT");
+        unsafe { RoInitialize(RO_INIT_SINGLETHREADED)? };
+
+        // Set DPI Awarness
+        trace!("Setting DPI Awarness");
+        unsafe { SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE)? };
 
         // Create A Dispatcher Queue For Current Thread
+        trace!("Creating A Dispatcher Queue For Capture Thread");
         let options = DispatcherQueueOptions {
             dwSize: std::mem::size_of::<DispatcherQueueOptions>() as u32,
             threadType: DQTYPE_THREAD_CURRENT,
@@ -275,53 +47,67 @@ pub trait WindowsCaptureHandler: Sized {
         };
         let controller = unsafe { CreateDispatcherQueueController(options)? };
 
+        // Start Capture
+        info!("Starting Capture Thread");
         let trigger = Self::new(settings.flags);
-        let mut capture = WindowsCapture::new(settings.item, trigger)?;
+        let mut capture = GraphicsCaptureApi::new(settings.item, trigger)?;
         capture.start_capture(settings.capture_cursor, settings.draw_border)?;
 
         // Message Loop
+        trace!("Entering Message Loop");
         let mut message = MSG::default();
         unsafe {
-            while GetMessageW(&mut message, None, 0, 0).into() {
+            while GetMessageW(&mut message, None, 0, 0).as_bool() {
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
         }
 
         // Shutdown Dispatcher Queue
+        trace!("Shutting Down Dispatcher Queue");
         let async_action = controller.ShutdownQueueAsync()?;
         async_action.SetCompleted(&AsyncActionCompletedHandler::new(
-            move |_, _| -> windows::core::Result<()> {
+            move |_, _| -> Result<(), windows::core::Error> {
                 unsafe { PostQuitMessage(0) };
                 Ok(())
             },
         ))?;
 
-        // Message Loop
-        let mut msg = MSG::default();
+        // Final Message Loop
+        trace!("Entering Final Message Loop");
+        let mut message = MSG::default();
         unsafe {
-            while GetMessageW(&mut msg, None, 0, 0).into() {
-                TranslateMessage(&msg);
-                DispatchMessageW(&msg);
+            while GetMessageW(&mut message, None, 0, 0).as_bool() {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
             }
         }
 
         // Stop Capturing
+        info!("Stopping Capture Thread");
         capture.stop_capture();
 
-        // Uninit WinRT
+        // Uninitialize WinRT
+        trace!("Uninitializing WinRT");
         unsafe { RoUninitialize() };
 
         Ok(())
     }
 
     /// Function That Will Be Called To Create The Struct The Flags Can Be
-    /// Passed From Settigns
+    /// Passed From Settings
     fn new(flags: Self::Flags) -> Self;
 
     /// Called Every Time A New Frame Is Available
-    fn on_frame_arrived(&mut self, frame: &Frame);
+    fn on_frame_arrived(&mut self, frame: Frame);
 
-    /// Called If The Capture Item Closed Usually When The Window Closes
+    /// Called When The Capture Item Closes Usually When The Window Closes,
+    /// Capture Will End After This Function Ends
     fn on_closed(&mut self);
+
+    /// Call To Stop The Capture Thread, You Might Receive A Few More Frames
+    /// Before It Stops
+    fn stop(&self) {
+        unsafe { PostQuitMessage(0) };
+    }
 }

@@ -16,34 +16,35 @@ use windows::{
     },
 };
 
-/// Used To Handle Internal Errors
-#[derive(Error, Debug)]
+/// Used To Handle Internal Window Errors
+#[derive(Error, Eq, PartialEq, Clone, Copy, Debug)]
 pub enum WindowErrors {
+    #[error("Failed To Get The Foreground Window")]
+    NoActiveWindow,
     #[error("Failed To Find Window")]
     NotFound,
-    #[error("Unknown Error")]
-    Unknown,
 }
 
 /// Represents A Windows
+#[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub struct Window {
     window: HWND,
 }
 
 impl Window {
     /// Get The Currently Active Foreground Window
-    pub fn get_foreground() -> Self {
+    pub fn foreground() -> Result<Self, Box<dyn std::error::Error>> {
         let window = unsafe { GetForegroundWindow() };
-        Self { window }
-    }
 
-    /// Crate From A HWND
-    pub const fn from_hwnd(window: HWND) -> Self {
-        Self { window }
+        if window.0 == 0 {
+            return Err(Box::new(WindowErrors::NoActiveWindow));
+        }
+
+        Ok(Self { window })
     }
 
     /// Create From A Window Name
-    pub fn from_window_name(title: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_name(title: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let title = HSTRING::from(title);
         let window = unsafe { FindWindowW(None, &title) };
 
@@ -54,13 +55,31 @@ impl Window {
         Ok(Self { window })
     }
 
+    /// Create From A Window Name Substring
+    pub fn from_contains_name(title: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let windows = Self::enumerate()?;
+
+        let mut target_window = None;
+        for window in windows {
+            if window.title()?.contains(title) {
+                target_window = Some(window);
+                break;
+            }
+        }
+
+        match target_window {
+            Some(window) => Ok(window),
+            None => Err(Box::new(WindowErrors::NotFound)),
+        }
+    }
+
     /// Get Window Title
-    pub fn get_window_title(window: HWND) -> Result<String, Box<dyn std::error::Error>> {
-        let len = unsafe { GetWindowTextLengthW(window) } + 1;
+    pub fn title(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let len = unsafe { GetWindowTextLengthW(self.window) } + 1;
 
         let mut name = vec![0u16; len as usize];
         if len > 1 {
-            let copied = unsafe { GetWindowTextW(window, &mut name) };
+            let copied = unsafe { GetWindowTextW(self.window, &mut name) };
             if copied == 0 {
                 return Ok(String::new());
             }
@@ -95,20 +114,21 @@ impl Window {
             }
         } else {
             warn!("GetClientRect Failed");
+            return false;
         }
 
         true
     }
 
     /// Get A List Of All Windows
-    pub fn get_windows() -> Result<Vec<HWND>, Box<dyn std::error::Error>> {
-        let mut windows: Vec<HWND> = Vec::new();
+    pub fn enumerate() -> Result<Vec<Window>, Box<dyn std::error::Error>> {
+        let mut windows: Vec<Window> = Vec::new();
 
         unsafe {
             EnumChildWindows(
                 GetDesktopWindow(),
                 Some(Self::enum_windows_callback),
-                LPARAM(&mut windows as *mut Vec<HWND> as isize),
+                LPARAM(&mut windows as *mut Vec<Window> as isize),
             )
             .ok()?
         };
@@ -125,16 +145,22 @@ impl Window {
         }
     }
 
+    /// Create From A Raw HWND
+    pub const fn from_raw_hwnd(window: HWND) -> Self {
+        Self { window }
+    }
+
     /// Get The Raw HWND
-    pub const fn get_raw_hwnd(&self) -> HWND {
+    pub const fn as_raw_hwnd(&self) -> HWND {
         self.window
     }
 
+    // Callback Used For Enumerating All Windows
     unsafe extern "system" fn enum_windows_callback(window: HWND, vec: LPARAM) -> BOOL {
-        let windows = &mut *(vec.0 as *mut Vec<HWND>);
+        let windows = &mut *(vec.0 as *mut Vec<Window>);
 
         if Self::is_window_valid(window) {
-            windows.push(window);
+            windows.push(Self { window });
         }
 
         TRUE
@@ -142,13 +168,14 @@ impl Window {
 }
 
 // Automatically Convert Window To GraphicsCaptureItem
-impl From<Window> for GraphicsCaptureItem {
-    fn from(value: Window) -> Self {
-        // Get Capture Item From HMONITOR
-        let window = value.get_raw_hwnd();
+impl TryFrom<Window> for GraphicsCaptureItem {
+    type Error = Box<dyn std::error::Error>;
 
-        let interop =
-            windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>().unwrap();
-        unsafe { interop.CreateForWindow(window).unwrap() }
+    fn try_from(value: Window) -> Result<Self, Self::Error> {
+        // Get Capture Item From HWND
+        let window = value.as_raw_hwnd();
+
+        let interop = windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
+        Ok(unsafe { interop.CreateForWindow(window)? })
     }
 }
