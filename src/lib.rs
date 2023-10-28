@@ -22,7 +22,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! windows-capture = "1.0.20"
+//! windows-capture = "1.0.21"
 //! ```
 //! or run this command
 //!

@@ -51,7 +51,7 @@ pub enum WindowsCaptureError {
     CaptureClosed,
 }
 
-/// Internal Capture Struct
+/// Struct To Use For Graphics Capture Api
 pub struct GraphicsCaptureApi {
     _item: GraphicsCaptureItem,
     _d3d_device: ID3D11Device,
@@ -65,7 +65,7 @@ pub struct GraphicsCaptureApi {
 }
 
 impl GraphicsCaptureApi {
-    /// Create A New Internal Capture Item
+    /// Create A New Graphics Capture Api Struct
     pub fn new<T: WindowsCaptureHandler + std::marker::Send + 'static>(
         item: GraphicsCaptureItem,
         callback: T,
@@ -267,7 +267,7 @@ impl GraphicsCaptureApi {
         })
     }
 
-    /// Start Internal Capture
+    /// Start Capture
     pub fn start_capture(
         &mut self,
         capture_cursor: Option<bool>,
@@ -319,7 +319,7 @@ impl GraphicsCaptureApi {
         Ok(())
     }
 
-    /// Stop Internal Capture
+    /// Stop Capture
     pub fn stop_capture(&mut self) {
         self.closed = true;
 
@@ -330,6 +330,30 @@ impl GraphicsCaptureApi {
         if let Some(session) = self.session.take() {
             session.Close().expect("Failed to Close Capture Session");
         }
+    }
+
+    /// Check If Windows Graphics Capture Api Is Supported
+    pub fn is_supported() -> Result<bool, Box<dyn std::error::Error>> {
+        Ok(ApiInformation::IsApiContractPresentByMajor(
+            &HSTRING::from("Windows.Foundation.UniversalApiContract"),
+            8,
+        )?)
+    }
+
+    /// Check If You Can Toggle The Cursor On Or Off
+    pub fn is_cursor_toggle_supported() -> Result<bool, Box<dyn std::error::Error>> {
+        Ok(ApiInformation::IsPropertyPresent(
+            &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
+            &HSTRING::from("IsCursorCaptureEnabled"),
+        )?)
+    }
+
+    /// Check If You Can Toggle The Border On Or Off
+    pub fn is_border_toggle_supported() -> Result<bool, Box<dyn std::error::Error>> {
+        Ok(ApiInformation::IsPropertyPresent(
+            &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
+            &HSTRING::from("IsBorderRequired"),
+        )?)
     }
 }
 
