@@ -67,10 +67,7 @@ impl Window {
             }
         }
 
-        match target_window {
-            Some(window) => Ok(window),
-            None => Err(Box::new(WindowErrors::NotFound)),
-        }
+        Ok(target_window.map_or_else(|| Err(Box::new(WindowErrors::NotFound)), Ok)?)
     }
 
     /// Get Window Title
@@ -89,6 +86,7 @@ impl Window {
     }
 
     /// Check If The Window Is A Valid Window
+    #[must_use]
     pub fn is_window_valid(window: HWND) -> bool {
         if !unsafe { IsWindowVisible(window).as_bool() } {
             return false;
@@ -121,16 +119,16 @@ impl Window {
     }
 
     /// Get A List Of All Windows
-    pub fn enumerate() -> Result<Vec<Window>, Box<dyn std::error::Error>> {
-        let mut windows: Vec<Window> = Vec::new();
+    pub fn enumerate() -> Result<Vec<Self>, Box<dyn std::error::Error>> {
+        let mut windows: Vec<Self> = Vec::new();
 
         unsafe {
             EnumChildWindows(
                 GetDesktopWindow(),
                 Some(Self::enum_windows_callback),
-                LPARAM(&mut windows as *mut Vec<Window> as isize),
+                LPARAM(std::ptr::addr_of_mut!(windows) as isize),
             )
-            .ok()?
+            .ok()?;
         };
 
         Ok(windows)
@@ -146,18 +144,20 @@ impl Window {
     }
 
     /// Create From A Raw HWND
+    #[must_use]
     pub const fn from_raw_hwnd(window: HWND) -> Self {
         Self { window }
     }
 
     /// Get The Raw HWND
+    #[must_use]
     pub const fn as_raw_hwnd(&self) -> HWND {
         self.window
     }
 
     // Callback Used For Enumerating All Windows
     unsafe extern "system" fn enum_windows_callback(window: HWND, vec: LPARAM) -> BOOL {
-        let windows = &mut *(vec.0 as *mut Vec<Window>);
+        let windows = &mut *(vec.0 as *mut Vec<Self>);
 
         if Self::is_window_valid(window) {
             windows.push(Self { window });
@@ -175,7 +175,7 @@ impl TryFrom<Window> for GraphicsCaptureItem {
         // Get Capture Item From HWND
         let window = value.as_raw_hwnd();
 
-        let interop = windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
+        let interop = windows::core::factory::<Self, IGraphicsCaptureItemInterop>()?;
         Ok(unsafe { interop.CreateForWindow(window)? })
     }
 }

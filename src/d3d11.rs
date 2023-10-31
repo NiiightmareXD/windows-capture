@@ -23,11 +23,12 @@ use windows::{
 pub struct SendDirectX<T>(pub T);
 
 impl<T> SendDirectX<T> {
-    pub fn new(device: T) -> Self {
+    pub const fn new(device: T) -> Self {
         Self(device)
     }
 }
 
+#[allow(clippy::non_send_fields_in_send_ty)]
 unsafe impl<T> Send for SendDirectX<T> {}
 
 /// Used To Handle Internal DirectX Errors
@@ -66,7 +67,7 @@ pub fn create_d3d_device() -> Result<(ID3D11Device, ID3D11DeviceContext), Box<dy
             Some(&mut d3d_device),
             Some(&mut feature_level),
             Some(&mut d3d_device_context),
-        )?
+        )?;
     };
 
     if feature_level != D3D_FEATURE_LEVEL_11_1 {

@@ -87,6 +87,14 @@
 //!
 //! Capture::start(settings).unwrap();
 //! ```
+#![feature(strict_provenance)]
+#![warn(clippy::semicolon_if_nothing_returned)]
+#![warn(clippy::inconsistent_struct_constructor)]
+#![warn(clippy::must_use_candidate)]
+#![warn(clippy::ptr_as_ptr)]
+#![warn(clippy::borrow_as_ptr)]
+#![warn(clippy::nursery)]
+#![warn(clippy::cargo)]
 
 mod buffer;
 pub mod capture;

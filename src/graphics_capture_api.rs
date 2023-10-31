@@ -30,7 +30,7 @@ use windows::{
 };
 
 use crate::{
-    buffer::{Buffer, SendPtr},
+    buffer::{Buffer, SendBuffer},
     capture::WindowsCaptureHandler,
     d3d11::{create_d3d_device, create_direct3d_device, SendDirectX},
     frame::Frame,
@@ -78,9 +78,9 @@ impl GraphicsCaptureApi {
             return Err(Box::new(WindowsCaptureError::Unsupported));
         }
 
-        // Allocate 128MB Of Memory
-        trace!("Allocating 128MB Of Memory");
-        let layout = Layout::new::<[u8; 128 * 1024 * 1024]>();
+        // Allocate 8MB Of Memory
+        trace!("Allocating 8MB Of Memory");
+        let layout = Layout::new::<[u8; 8 * 1024 * 1024]>();
         let ptr = unsafe { alloc::alloc(layout) };
         if ptr.is_null() {
             alloc::handle_alloc_error(layout);
@@ -98,7 +98,7 @@ impl GraphicsCaptureApi {
         let frame_pool = Direct3D11CaptureFramePool::Create(
             &direct3d_device,
             DirectXPixelFormat::R8G8B8A8UIntNormalized,
-            2,
+            1,
             item.Size()?,
         )?;
         let frame_pool = Arc::new(frame_pool);
@@ -137,7 +137,7 @@ impl GraphicsCaptureApi {
             &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new({
                 // Init
                 let frame_pool_recreate = frame_pool.clone();
-                let closed_frame_pool = closed.clone();
+                let closed_frame_pool = closed;
                 let d3d_device_frame_pool = d3d_device.clone();
                 let context = d3d_device_context.clone();
 
@@ -145,8 +145,7 @@ impl GraphicsCaptureApi {
                 let callback_frame_arrived = callback;
                 let direct3d_device_recreate = SendDirectX::new(direct3d_device.clone());
 
-                let buffer = SendPtr::new(buffer.ptr);
-
+                let buffer = SendBuffer::new(buffer);
                 move |frame, _| {
                     // Return Early If The Capture Is Closed
                     if closed_frame_pool.load(atomic::Ordering::Relaxed) {
@@ -188,7 +187,7 @@ impl GraphicsCaptureApi {
                                 .Recreate(
                                     &direct3d_device_recreate.0,
                                     DirectXPixelFormat::R8G8B8A8UIntNormalized,
-                                    2,
+                                    1,
                                     frame_content_size,
                                 )
                                 .unwrap();
@@ -226,7 +225,7 @@ impl GraphicsCaptureApi {
                                 &texture_desc,
                                 None,
                                 Some(&mut texture),
-                            )?
+                            )?;
                         };
                         let texture = texture.unwrap();
 

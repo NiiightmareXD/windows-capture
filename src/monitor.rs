@@ -25,6 +25,7 @@ pub struct Monitor {
 
 impl Monitor {
     /// Get The Primary Monitor
+    #[must_use]
     pub fn primary() -> Self {
         let point = POINT { x: 0, y: 0 };
         let monitor = unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY) };
@@ -52,20 +53,22 @@ impl Monitor {
                 None,
                 None,
                 Some(Self::enum_monitors_callback),
-                LPARAM(&mut monitors as *mut Vec<HMONITOR> as isize),
+                LPARAM(std::ptr::addr_of_mut!(monitors) as isize),
             )
-            .ok()?
+            .ok()?;
         };
 
         Ok(monitors)
     }
 
     /// Create From A Raw HMONITOR
+    #[must_use]
     pub const fn from_raw_hmonitor(monitor: HMONITOR) -> Self {
         Self { monitor }
     }
 
     /// Get The Raw HMONITOR
+    #[must_use]
     pub const fn as_raw_hmonitor(&self) -> HMONITOR {
         self.monitor
     }
@@ -93,7 +96,7 @@ impl TryFrom<Monitor> for GraphicsCaptureItem {
         // Get Capture Item From HMONITOR
         let monitor = value.as_raw_hmonitor();
 
-        let interop = windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
+        let interop = windows::core::factory::<Self, IGraphicsCaptureItemInterop>()?;
         Ok(unsafe { interop.CreateForMonitor(monitor)? })
     }
 }
