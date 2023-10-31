@@ -1,6 +1,6 @@
 [package]
 name = "windows-capture"
-version = "1.0.21"
+version = "1.0.22"
 authors = ["NiiightmareXD"]
 edition = "2021"
 description = "Simple Windows Screen Capture Library For Rust And Python 🔥"

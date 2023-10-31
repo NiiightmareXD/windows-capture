@@ -16,7 +16,7 @@ Add this library to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-windows-capture = "1.0.21"
+windows-capture = "1.0.22"
 ```
 or run this command
 
@@ -44,7 +44,7 @@ impl WindowsCaptureHandler for Capture {
         Self {}
     }
 
-    fn on_frame_arrived(&mut self, frame: Frame) {
+    fn on_frame_arrived(&mut self, mut frame: Frame) {
         // Called Every Time A New Frame Is Available
         println!("Got A New Frame");
 
