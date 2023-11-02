@@ -78,7 +78,7 @@
 //!     foreground_window,
 //!     // Capture Cursor
 //!     Some(true),
-//!     // Draw Borders
+//!     // Draw Border
 //!     Some(false),
 //!     // This Will Be Passed To The New Function
 //!     "It Works".to_string(),

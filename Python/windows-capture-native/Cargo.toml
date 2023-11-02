@@ -1,0 +1,27 @@
+[package]
+name = "windows-capture-native"
+version = "1.0.22"
+authors = ["NiiightmareXD"]
+edition = "2021"
+description = "Fastest Windows Screen Capture Library For Python 🔥"
+documentation = "https://docs.rs/windows-capture"
+readme = "../../README.md"
+repository = "https://github.com/NiiightmareXD/windows-capture"
+license = "MIT"
+keywords = ["screen", "capture", "screenshot", "graphics", "windows"]
+categories = [
+    "os::windows-apis",
+    "api-bindings",
+    "graphics",
+    "gui",
+    "multimedia",
+]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "windows_capture_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = "0.20.0"
+windows-capture = { path = "../../" }

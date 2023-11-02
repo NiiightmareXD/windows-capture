@@ -2,9 +2,12 @@ use log::{info, trace};
 use windows::{
     Foundation::AsyncActionCompletedHandler,
     Win32::{
-        System::WinRT::{
-            CreateDispatcherQueueController, DispatcherQueueOptions, RoInitialize, RoUninitialize,
-            DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, RO_INIT_SINGLETHREADED,
+        System::{
+            Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED, COINIT_SPEED_OVER_MEMORY},
+            WinRT::{
+                CreateDispatcherQueueController, DispatcherQueueOptions, DQTAT_COM_NONE,
+                DQTYPE_THREAD_CURRENT,
+            },
         },
         UI::{
             HiDpi::{SetProcessDpiAwareness, PROCESS_PER_MONITOR_DPI_AWARE},
@@ -30,9 +33,9 @@ pub trait WindowsCaptureHandler: Sized {
     where
         Self: std::marker::Send + 'static,
     {
-        // Initialize WinRT
-        trace!("Initializing WinRT");
-        unsafe { RoInitialize(RO_INIT_SINGLETHREADED)? };
+        // Initialize COM
+        trace!("Initializing COM");
+        unsafe { CoInitializeEx(None, COINIT_MULTITHREADED | COINIT_SPEED_OVER_MEMORY)? };
 
         // Set DPI Awarness
         trace!("Setting DPI Awarness");
@@ -87,9 +90,9 @@ pub trait WindowsCaptureHandler: Sized {
         info!("Stopping Capture Thread");
         capture.stop_capture();
 
-        // Uninitialize WinRT
-        trace!("Uninitializing WinRT");
-        unsafe { RoUninitialize() };
+        // Uninitialize COM
+        trace!("Uninitializing COM");
+        unsafe { CoUninitialize() };
 
         Ok(())
     }

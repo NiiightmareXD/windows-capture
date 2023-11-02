@@ -3,7 +3,7 @@ name = "windows-capture"
 version = "1.0.22"
 authors = ["NiiightmareXD"]
 edition = "2021"
-description = "Simple Windows Screen Capture Library For Rust And Python 🔥"
+description = "Fastest Windows Screen Capture Library For Rust 🔥"
 documentation = "https://docs.rs/windows-capture"
 readme = "README.md"
 repository = "https://github.com/NiiightmareXD/windows-capture"
@@ -16,6 +16,7 @@ categories = [
     "gui",
     "multimedia",
 ]
+resolver = "2"
 
 [dependencies]
 image = "0.24.7"
@@ -38,4 +39,8 @@ windows = { version = "0.51.1", features = [
     "Graphics_DirectX_Direct3D11",
     "Foundation_Metadata",
     "Win32_UI_HiDpi",
+    "Win32_System_Com",
 ] }
+
+[workspace]
+members = ["Python/windows-capture-native"]

@@ -1,17 +1,13 @@
-use std::{
-    alloc::{self, Layout},
-    mem, ptr,
-};
+use std::{mem, ptr};
 
 use image::ColorType;
-use log::info;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use thiserror::Error;
 use windows::Win32::Graphics::Direct3D11::{
     ID3D11DeviceContext, ID3D11Texture2D, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ,
 };
 
-use crate::buffer::{Buffer, SendSyncPtr};
+use crate::buffer::SendSyncPtr;
 
 /// Used To Handle Internal Frame Errors
 #[derive(Error, Eq, PartialEq, Clone, Copy, Debug)]
@@ -31,23 +27,23 @@ pub struct Rgba {
 }
 
 /// Frame Struct Used To Crop And Get The Frame Buffer
-pub struct Frame {
-    buffer: Buffer,
+pub struct Frame<'a> {
+    buffer: *mut u8,
     texture: ID3D11Texture2D,
     frame_surface: ID3D11Texture2D,
-    context: ID3D11DeviceContext,
+    context: &'a ID3D11DeviceContext,
     width: u32,
     height: u32,
 }
 
-impl Frame {
+impl<'a> Frame<'a> {
     /// Craete A New Frame
     #[must_use]
     pub const fn new(
-        buffer: Buffer,
+        buffer: *mut u8,
         texture: ID3D11Texture2D,
         frame_surface: ID3D11Texture2D,
-        context: ID3D11DeviceContext,
+        context: &'a ID3D11DeviceContext,
         width: u32,
         height: u32,
     ) -> Self {
@@ -106,37 +102,8 @@ impl Frame {
             // There Is Padding So We Have To Work According To:
             // https://learn.microsoft.com/en-us/windows/win32/medfound/image-stride
 
-            // Reallocate If Buffer Is Too Small
-            if self.buffer.layout.size() < (self.width * self.height * 4) as usize {
-                info!(
-                    "Reallocating Buffer Size To {:.1}MB",
-                    ((self.width * self.height * 4) as f32 / 1024.0 / 1024.0)
-                );
-
-                let new_cap = (self.width * self.height * 4) as usize;
-                let new_layout = Layout::array::<u8>(new_cap)?;
-
-                assert!(
-                    new_layout.size() <= isize::MAX as usize,
-                    "Allocation too large"
-                );
-
-                unsafe {
-                    let new_ptr =
-                        alloc::realloc(self.buffer.ptr, self.buffer.layout, new_layout.size());
-
-                    self.buffer.ptr = if new_ptr.is_null() {
-                        alloc::handle_alloc_error(self.buffer.layout)
-                    } else {
-                        new_ptr
-                    };
-
-                    self.buffer.layout = new_layout;
-                };
-            }
-
             let row_size = self.width as usize * std::mem::size_of::<Rgba>();
-            let send_sync_ptr = SendSyncPtr::new(self.buffer.ptr);
+            let send_sync_ptr = SendSyncPtr::new(self.buffer);
             let send_sync_pdata = SendSyncPtr::new(mapped_resource.pData.cast::<u8>());
 
             (0..self.height).into_par_iter().for_each(|i| {
@@ -156,7 +123,7 @@ impl Frame {
 
             unsafe {
                 std::slice::from_raw_parts(
-                    self.buffer.ptr.cast::<Rgba>(),
+                    self.buffer.cast::<Rgba>(),
                     (self.width * self.height) as usize,
                 )
             }

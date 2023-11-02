@@ -1,5 +1,3 @@
-use std::alloc::Layout;
-
 /// To Send Raw Pointers Between Threads
 pub struct SendSyncPtr<T>(pub *mut T);
 
@@ -12,27 +10,13 @@ impl<T> SendSyncPtr<T> {
 unsafe impl<T> Send for SendSyncPtr<T> {}
 unsafe impl<T> Sync for SendSyncPtr<T> {}
 
-/// To Share Buffer Struct Between Threads
-pub struct SendBuffer<T>(pub T);
+/// To Send Raw Pointers Between Threads
+pub struct SendPtr<T>(pub *mut T);
 
-impl<T> SendBuffer<T> {
-    pub const fn new(device: T) -> Self {
-        Self(device)
+impl<T> SendPtr<T> {
+    pub const fn new(ptr: *mut T) -> Self {
+        Self(ptr)
     }
 }
 
-#[allow(clippy::non_send_fields_in_send_ty)]
-unsafe impl<T> Send for SendBuffer<T> {}
-
-/// To Save Pointer And It's Layout Together
-#[derive(Clone, Copy)]
-pub struct Buffer {
-    pub ptr: *mut u8,
-    pub layout: Layout,
-}
-
-impl Buffer {
-    pub const fn new(ptr: *mut u8, layout: Layout) -> Self {
-        Self { ptr, layout }
-    }
-}
+unsafe impl<T> Send for SendPtr<T> {}

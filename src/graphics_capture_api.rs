@@ -30,7 +30,7 @@ use windows::{
 };
 
 use crate::{
-    buffer::{Buffer, SendBuffer},
+    buffer::SendPtr,
     capture::WindowsCaptureHandler,
     d3d11::{create_d3d_device, create_direct3d_device, SendDirectX},
     frame::Frame,
@@ -47,8 +47,6 @@ pub enum WindowsCaptureError {
     BorderUnsupported,
     #[error("Already Started")]
     AlreadyStarted,
-    #[error("Capture Session Is Closed")]
-    CaptureClosed,
 }
 
 /// Struct To Use For Graphics Capture Api
@@ -57,11 +55,11 @@ pub struct GraphicsCaptureApi {
     _d3d_device: ID3D11Device,
     _direct3d_device: IDirect3DDevice,
     _d3d_device_context: ID3D11DeviceContext,
-    buffer: Buffer,
+    buffer_layout: Layout,
+    buffer_ptr: *mut u8,
     frame_pool: Option<Arc<Direct3D11CaptureFramePool>>,
     session: Option<GraphicsCaptureSession>,
     active: bool,
-    closed: bool,
 }
 
 impl GraphicsCaptureApi {
@@ -78,15 +76,14 @@ impl GraphicsCaptureApi {
             return Err(Box::new(WindowsCaptureError::Unsupported));
         }
 
-        // Allocate 8MB Of Memory
-        trace!("Allocating 8MB Of Memory");
-        let layout = Layout::new::<[u8; 8 * 1024 * 1024]>();
-        let ptr = unsafe { alloc::alloc(layout) };
-        if ptr.is_null() {
-            alloc::handle_alloc_error(layout);
+        // Allocate 256MB Of Memory (This Makes It So There Is No Need To Ever
+        // Reallocate And It Supports Up To 16K Monitor Resolution)
+        trace!("Allocating 256MB Of Memory");
+        let buffer_layout = Layout::new::<[u8; 256 * 1024 * 1024]>();
+        let buffer_ptr = unsafe { alloc::alloc(buffer_layout) };
+        if buffer_ptr.is_null() {
+            alloc::handle_alloc_error(buffer_layout);
         }
-
-        let buffer = Buffer::new(ptr, layout);
 
         // Create DirectX Devices
         trace!("Creating DirectX Devices");
@@ -121,11 +118,11 @@ impl GraphicsCaptureApi {
                 let closed_item = closed.clone();
 
                 move |_, _| {
+                    closed_item.store(true, atomic::Ordering::Relaxed);
+
                     unsafe { PostQuitMessage(0) };
 
                     callback_closed.lock().on_closed();
-
-                    closed_item.store(true, atomic::Ordering::Relaxed);
 
                     Result::Ok(())
                 }
@@ -144,8 +141,8 @@ impl GraphicsCaptureApi {
                 let mut last_size = item.Size()?;
                 let callback_frame_arrived = callback;
                 let direct3d_device_recreate = SendDirectX::new(direct3d_device.clone());
+                let buffer_frame_arrived = SendPtr::new(buffer_ptr);
 
-                let buffer = SendBuffer::new(buffer);
                 move |frame, _| {
                     // Return Early If The Capture Is Closed
                     if closed_frame_pool.load(atomic::Ordering::Relaxed) {
@@ -229,12 +226,12 @@ impl GraphicsCaptureApi {
                         };
                         let texture = texture.unwrap();
 
-                        let buffer = &buffer;
+                        let buffer_frame_arrived = &buffer_frame_arrived;
                         let frame = Frame::new(
-                            buffer.0,
+                            buffer_frame_arrived.0,
                             texture,
                             frame_surface,
-                            context.clone(),
+                            &context,
                             texture_width,
                             texture_height,
                         );
@@ -258,11 +255,11 @@ impl GraphicsCaptureApi {
             _d3d_device: d3d_device,
             _direct3d_device: direct3d_device,
             _d3d_device_context: d3d_device_context,
-            buffer,
+            buffer_layout,
+            buffer_ptr,
             frame_pool: Some(frame_pool),
             session: Some(session),
             active: false,
-            closed: false,
         })
     }
 
@@ -275,10 +272,6 @@ impl GraphicsCaptureApi {
         // Check If The Capture Is Already Installed
         if self.active {
             return Err(Box::new(WindowsCaptureError::AlreadyStarted));
-        }
-
-        if self.closed {
-            return Err(Box::new(WindowsCaptureError::CaptureClosed));
         }
 
         // Config
@@ -319,9 +312,7 @@ impl GraphicsCaptureApi {
     }
 
     /// Stop Capture
-    pub fn stop_capture(&mut self) {
-        self.closed = true;
-
+    pub fn stop_capture(mut self) {
         if let Some(frame_pool) = self.frame_pool.take() {
             frame_pool.Close().expect("Failed to Close Frame Pool");
         }
@@ -356,18 +347,19 @@ impl GraphicsCaptureApi {
     }
 }
 
+// Close Screen Capture And Deallocate Memory
 impl Drop for GraphicsCaptureApi {
     fn drop(&mut self) {
-        if !self.closed {
-            if let Some(frame_pool) = self.frame_pool.take() {
-                frame_pool.Close().expect("Failed to Close Frame Pool");
-            }
-
-            if let Some(session) = self.session.take() {
-                session.Close().expect("Failed to Close Capture Session");
-            }
+        if let Some(frame_pool) = self.frame_pool.take() {
+            frame_pool.Close().expect("Failed to Close Frame Pool");
         }
 
-        unsafe { alloc::dealloc(self.buffer.ptr, self.buffer.layout) };
+        if let Some(session) = self.session.take() {
+            session.Close().expect("Failed to Close Capture Session");
+        }
+
+        // Deallocate 256MB Of Memory
+        trace!("Deallocating 256MB Of Memory");
+        unsafe { alloc::dealloc(self.buffer_ptr, self.buffer_layout) };
     }
 }
