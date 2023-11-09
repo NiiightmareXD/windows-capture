@@ -24,4 +24,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = "0.20.0"
+windows = { version = "0.51.1", features = [
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Foundation",
+] }
 windows-capture = { path = "../../" }

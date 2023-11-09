@@ -1,7 +1,7 @@
 use thiserror::Error;
 use windows::Graphics::Capture::GraphicsCaptureItem;
 
-/// Used To Handle Internal Settings Errors
+/// Used To Handle Settings Errors
 #[derive(Error, Eq, PartialEq, Clone, Copy, Debug)]
 pub enum SettingsErrors {
     #[error("Failed To Convert To GraphicsCaptureItem")]

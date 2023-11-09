@@ -10,7 +10,7 @@ use windows::{
     },
 };
 
-/// Used To Handle Internal Monitor Errors
+/// Used To Handle Monitor Errors
 #[derive(Error, Eq, PartialEq, Clone, Copy, Debug)]
 pub enum MonitorErrors {
     #[error("Failed To Find Monitor")]

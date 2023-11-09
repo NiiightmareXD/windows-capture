@@ -16,7 +16,7 @@ use windows::{
     },
 };
 
-/// Used To Handle Internal Window Errors
+/// Used To Handle Window Errors
 #[derive(Error, Eq, PartialEq, Clone, Copy, Debug)]
 pub enum WindowErrors {
     #[error("Failed To Get The Foreground Window")]

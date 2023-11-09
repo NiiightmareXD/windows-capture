@@ -7,12 +7,16 @@
 #![warn(clippy::cargo)]
 #![allow(clippy::redundant_pub_crate)]
 
-use std::{sync::Arc, time::Instant};
-
-use pyo3::{
-    prelude::*,
-    types::{PyBytes, PyTuple},
+use std::{
+    sync::{
+        atomic::{self, AtomicBool},
+        Arc,
+    },
+    time::Instant,
 };
+
+use pyo3::prelude::*;
+use windows::Win32::UI::WindowsAndMessaging::PostQuitMessage;
 use windows_capture::{
     capture::WindowsCaptureHandler, frame::Frame, monitor::Monitor,
     settings::WindowsCaptureSettings,
@@ -25,16 +29,19 @@ fn windows_capture_native(_py: Python, m: &PyModule) -> PyResult<()> {
     Ok(())
 }
 
+/// Internal Struct Used For Windows Capture
 #[pyclass]
 pub struct NativeWindowsCapture {
     capture_cursor: bool,
     draw_border: bool,
     on_frame_arrived_callback: Arc<PyObject>,
     on_closed: Arc<PyObject>,
+    active: Arc<AtomicBool>,
 }
 
 #[pymethods]
 impl NativeWindowsCapture {
+    /// Create A New Windows Capture Struct
     #[new]
     #[must_use]
     pub fn new(
@@ -48,9 +55,11 @@ impl NativeWindowsCapture {
             draw_border,
             on_frame_arrived_callback: Arc::new(on_frame_arrived_callback),
             on_closed: Arc::new(on_closed),
+            active: Arc::new(AtomicBool::new(true)),
         }
     }
 
+    /// Start Capture
     pub fn start(&mut self) {
         let settings = WindowsCaptureSettings::new(
             Monitor::primary(),
@@ -59,45 +68,59 @@ impl NativeWindowsCapture {
             (
                 self.on_frame_arrived_callback.clone(),
                 self.on_closed.clone(),
+                self.active.clone(),
             ),
         )
         .unwrap();
 
         InnerNativeWindowsCapture::start(settings).unwrap();
     }
+
+    /// Stop Capture
+    pub fn stop(&mut self) {
+        println!("STOP");
+        self.active.store(false, atomic::Ordering::Relaxed);
+    }
 }
 
-pub struct InnerNativeWindowsCapture {
+/// Internal Capture Struct Used From NativeWindowsCapture
+struct InnerNativeWindowsCapture {
     on_frame_arrived_callback: Arc<PyObject>,
     on_closed: Arc<PyObject>,
+    active: Arc<AtomicBool>,
 }
 
 impl WindowsCaptureHandler for InnerNativeWindowsCapture {
-    type Flags = (Arc<PyObject>, Arc<PyObject>);
+    type Flags = (Arc<PyObject>, Arc<PyObject>, Arc<AtomicBool>);
 
-    fn new((on_frame_arrived_callback, on_closed): Self::Flags) -> Self {
+    fn new((on_frame_arrived_callback, on_closed, active): Self::Flags) -> Self {
         Self {
             on_frame_arrived_callback,
             on_closed,
+            active,
         }
     }
 
     fn on_frame_arrived(&mut self, mut frame: Frame) {
-        let instant = Instant::now();
-        let buf = frame.buffer().unwrap();
+        if !self.active.load(atomic::Ordering::Relaxed) {
+            unsafe { PostQuitMessage(0) };
+            return;
+        }
 
-        let buf_bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(buf.as_ptr().cast::<u8>(), std::mem::size_of_val(buf))
-        };
+        let instant = Instant::now();
+        let width = frame.width();
+        let height = frame.height();
+        let buf = frame.buffer().unwrap();
+        let buf = buf.as_raw_buffer();
+        let row_pitch = buf.len() / height as usize;
 
         Python::with_gil(|py| {
-            let buf_pybytes = PyBytes::new(py, buf_bytes);
+            py.check_signals().unwrap();
 
-            let args = PyTuple::new(py, [buf_pybytes]);
-
-            self.on_frame_arrived_callback.call1(py, args)
-        })
-        .unwrap();
+            self.on_frame_arrived_callback
+                .call1(py, (buf.as_ptr() as isize, width, height, row_pitch))
+                .unwrap();
+        });
 
         println!("Took: {}", instant.elapsed().as_nanos() as f32 / 1000000.0);
     }

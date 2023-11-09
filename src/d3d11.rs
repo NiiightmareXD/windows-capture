@@ -31,7 +31,7 @@ impl<T> SendDirectX<T> {
 #[allow(clippy::non_send_fields_in_send_ty)]
 unsafe impl<T> Send for SendDirectX<T> {}
 
-/// Used To Handle Internal DirectX Errors
+/// Used To Handle DirectX Errors
 #[derive(Error, Eq, PartialEq, Clone, Copy, Debug)]
 pub enum DirectXErrors {
     #[error("Failed To Create DirectX Device With The Recommended Feature Level")]
@@ -39,8 +39,8 @@ pub enum DirectXErrors {
 }
 
 /// Create ID3D11Device And ID3D11DeviceContext
-pub fn create_d3d_device() -> Result<(ID3D11Device, ID3D11DeviceContext), Box<dyn std::error::Error>>
-{
+pub fn create_d3d_device()
+-> Result<(ID3D11Device, ID3D11DeviceContext), Box<dyn std::error::Error + Send + Sync>> {
     // Set Feature Flags
     let feature_flags = [
         D3D_FEATURE_LEVEL_11_1,
@@ -80,7 +80,7 @@ pub fn create_d3d_device() -> Result<(ID3D11Device, ID3D11DeviceContext), Box<dy
 /// Create A IDirect3DDevice From ID3D11Device
 pub fn create_direct3d_device(
     d3d_device: &ID3D11Device,
-) -> Result<IDirect3DDevice, Box<dyn std::error::Error>> {
+) -> Result<IDirect3DDevice, Box<dyn std::error::Error + Send + Sync>> {
     let dxgi_device: IDXGIDevice = d3d_device.cast()?;
     let inspectable = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi_device)? };
     let device: IDirect3DDevice = inspectable.cast()?;

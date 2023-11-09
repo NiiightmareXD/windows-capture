@@ -1,9 +1,6 @@
-use std::{
-    alloc::{self, Layout},
-    sync::{
-        atomic::{self, AtomicBool},
-        Arc,
-    },
+use std::sync::{
+    atomic::{self, AtomicBool},
+    Arc,
 };
 
 use log::{info, trace};
@@ -30,36 +27,35 @@ use windows::{
 };
 
 use crate::{
-    buffer::SendPtr,
     capture::WindowsCaptureHandler,
     d3d11::{create_d3d_device, create_direct3d_device, SendDirectX},
     frame::Frame,
 };
 
-/// Used To Handle Internal Capture Errors
+/// Used To Handle Capture Errors
 #[derive(Error, Eq, PartialEq, Clone, Copy, Debug)]
 pub enum WindowsCaptureError {
     #[error("Graphics Capture API Is Not Supported")]
     Unsupported,
-    #[error("Graphics Capture API Changing Cursor Status Is Not Supported")]
+    #[error("Graphics Capture API Toggling Cursor Capture Is Not Supported")]
     CursorUnsupported,
-    #[error("Graphics Capture API Changing Border Status Is Not Supported")]
+    #[error("Graphics Capture API Toggling Border Capture Is Not Supported")]
     BorderUnsupported,
     #[error("Already Started")]
     AlreadyStarted,
 }
 
-/// Struct To Use For Graphics Capture Api
+/// Struct Used For Graphics Capture Api
 pub struct GraphicsCaptureApi {
     _item: GraphicsCaptureItem,
     _d3d_device: ID3D11Device,
     _direct3d_device: IDirect3DDevice,
     _d3d_device_context: ID3D11DeviceContext,
-    buffer_layout: Layout,
-    buffer_ptr: *mut u8,
     frame_pool: Option<Arc<Direct3D11CaptureFramePool>>,
     session: Option<GraphicsCaptureSession>,
     active: bool,
+    capture_cursor: Option<bool>,
+    draw_border: Option<bool>,
 }
 
 impl GraphicsCaptureApi {
@@ -67,22 +63,15 @@ impl GraphicsCaptureApi {
     pub fn new<T: WindowsCaptureHandler + std::marker::Send + 'static>(
         item: GraphicsCaptureItem,
         callback: T,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+        capture_cursor: Option<bool>,
+        draw_border: Option<bool>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Check Support
         if !ApiInformation::IsApiContractPresentByMajor(
             &HSTRING::from("Windows.Foundation.UniversalApiContract"),
             8,
         )? {
             return Err(Box::new(WindowsCaptureError::Unsupported));
-        }
-
-        // Allocate 256MB Of Memory (This Makes It So There Is No Need To Ever
-        // Reallocate And It Supports Up To 16K Monitor Resolution)
-        trace!("Allocating 256MB Of Memory");
-        let buffer_layout = Layout::new::<[u8; 256 * 1024 * 1024]>();
-        let buffer_ptr = unsafe { alloc::alloc(buffer_layout) };
-        if buffer_ptr.is_null() {
-            alloc::handle_alloc_error(buffer_layout);
         }
 
         // Create DirectX Devices
@@ -141,7 +130,6 @@ impl GraphicsCaptureApi {
                 let mut last_size = item.Size()?;
                 let callback_frame_arrived = callback;
                 let direct3d_device_recreate = SendDirectX::new(direct3d_device.clone());
-                let buffer_frame_arrived = SendPtr::new(buffer_ptr);
 
                 move |frame, _| {
                     // Return Early If The Capture Is Closed
@@ -226,9 +214,7 @@ impl GraphicsCaptureApi {
                         };
                         let texture = texture.unwrap();
 
-                        let buffer_frame_arrived = &buffer_frame_arrived;
                         let frame = Frame::new(
-                            buffer_frame_arrived.0,
                             texture,
                             frame_surface,
                             &context,
@@ -255,27 +241,23 @@ impl GraphicsCaptureApi {
             _d3d_device: d3d_device,
             _direct3d_device: direct3d_device,
             _d3d_device_context: d3d_device_context,
-            buffer_layout,
-            buffer_ptr,
             frame_pool: Some(frame_pool),
             session: Some(session),
             active: false,
+            capture_cursor,
+            draw_border,
         })
     }
 
     /// Start Capture
-    pub fn start_capture(
-        &mut self,
-        capture_cursor: Option<bool>,
-        draw_border: Option<bool>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn start_capture(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Check If The Capture Is Already Installed
         if self.active {
             return Err(Box::new(WindowsCaptureError::AlreadyStarted));
         }
 
         // Config
-        if capture_cursor.is_some() {
+        if self.capture_cursor.is_some() {
             if ApiInformation::IsPropertyPresent(
                 &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
                 &HSTRING::from("IsCursorCaptureEnabled"),
@@ -283,13 +265,13 @@ impl GraphicsCaptureApi {
                 self.session
                     .as_ref()
                     .unwrap()
-                    .SetIsCursorCaptureEnabled(capture_cursor.unwrap())?;
+                    .SetIsCursorCaptureEnabled(self.capture_cursor.unwrap())?;
             } else {
                 return Err(Box::new(WindowsCaptureError::CursorUnsupported));
             }
         }
 
-        if draw_border.is_some() {
+        if self.draw_border.is_some() {
             if ApiInformation::IsPropertyPresent(
                 &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
                 &HSTRING::from("IsBorderRequired"),
@@ -297,7 +279,7 @@ impl GraphicsCaptureApi {
                 self.session
                     .as_ref()
                     .unwrap()
-                    .SetIsBorderRequired(draw_border.unwrap())?;
+                    .SetIsBorderRequired(self.draw_border.unwrap())?;
             } else {
                 return Err(Box::new(WindowsCaptureError::BorderUnsupported));
             }
@@ -357,9 +339,5 @@ impl Drop for GraphicsCaptureApi {
         if let Some(session) = self.session.take() {
             session.Close().expect("Failed to Close Capture Session");
         }
-
-        // Deallocate 256MB Of Memory
-        trace!("Deallocating 256MB Of Memory");
-        unsafe { alloc::dealloc(self.buffer_ptr, self.buffer_layout) };
     }
 }

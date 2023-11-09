@@ -95,7 +95,6 @@
 #![warn(clippy::nursery)]
 #![warn(clippy::cargo)]
 
-mod buffer;
 pub mod capture;
 mod d3d11;
 pub mod frame;

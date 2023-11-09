@@ -1,34 +1,21 @@
-use std::{mem, ptr};
+use std::path::Path;
 
-use image::ColorType;
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use image::{Rgba, RgbaImage};
+use ndarray::{s, ArrayBase, ArrayView, Dim, OwnedRepr};
 use thiserror::Error;
 use windows::Win32::Graphics::Direct3D11::{
     ID3D11DeviceContext, ID3D11Texture2D, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ,
 };
 
-use crate::buffer::SendSyncPtr;
-
-/// Used To Handle Internal Frame Errors
+/// Used To Handle Frame Errors
 #[derive(Error, Eq, PartialEq, Clone, Copy, Debug)]
 pub enum FrameError {
     #[error("Graphics Capture API Is Not Supported")]
     InvalidSize,
 }
 
-/// Pixels Color Representation
-#[derive(Eq, PartialEq, Clone, Copy, Debug)]
-#[repr(C)]
-pub struct Rgba {
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
-    pub a: u8,
-}
-
-/// Frame Struct Used To Crop And Get The Frame Buffer
+/// Frame Struct Used To Get The Frame Buffer
 pub struct Frame<'a> {
-    buffer: *mut u8,
     texture: ID3D11Texture2D,
     frame_surface: ID3D11Texture2D,
     context: &'a ID3D11DeviceContext,
@@ -40,7 +27,6 @@ impl<'a> Frame<'a> {
     /// Craete A New Frame
     #[must_use]
     pub const fn new(
-        buffer: *mut u8,
         texture: ID3D11Texture2D,
         frame_surface: ID3D11Texture2D,
         context: &'a ID3D11DeviceContext,
@@ -48,7 +34,6 @@ impl<'a> Frame<'a> {
         height: u32,
     ) -> Self {
         Self {
-            buffer,
             texture,
             frame_surface,
             context,
@@ -70,7 +55,7 @@ impl<'a> Frame<'a> {
     }
 
     /// Get The Frame Buffer
-    pub fn buffer(&mut self) -> Result<&[Rgba], Box<dyn std::error::Error>> {
+    pub fn buffer(&mut self) -> Result<FrameBuffer, Box<dyn std::error::Error>> {
         // Copy The Real Texture To Copy Texture
         unsafe {
             self.context
@@ -89,59 +74,114 @@ impl<'a> Frame<'a> {
             )?;
         };
 
-        // Create A Slice From The Bits
-        let slice = if self.width * 4 == mapped_resource.RowPitch {
-            // Means There Is No Padding And We Can Do Our Work
-            unsafe {
-                std::slice::from_raw_parts(
-                    mapped_resource.pData as *const Rgba,
-                    (self.height * mapped_resource.RowPitch) as usize / std::mem::size_of::<Rgba>(),
-                )
-            }
-        } else {
-            // There Is Padding So We Have To Work According To:
-            // https://learn.microsoft.com/en-us/windows/win32/medfound/image-stride
-
-            let row_size = self.width as usize * std::mem::size_of::<Rgba>();
-            let send_sync_ptr = SendSyncPtr::new(self.buffer);
-            let send_sync_pdata = SendSyncPtr::new(mapped_resource.pData.cast::<u8>());
-
-            (0..self.height).into_par_iter().for_each(|i| {
-                let send_sync_ptr = &send_sync_ptr;
-                let send_sync_pdata = &send_sync_pdata;
-
-                unsafe {
-                    ptr::copy_nonoverlapping(
-                        send_sync_pdata
-                            .0
-                            .add((i * mapped_resource.RowPitch) as usize),
-                        send_sync_ptr.0.add(i as usize * row_size),
-                        row_size,
-                    );
-                };
-            });
-
-            unsafe {
-                std::slice::from_raw_parts(
-                    self.buffer.cast::<Rgba>(),
-                    (self.width * self.height) as usize,
-                )
-            }
+        // Get The Mapped Resource Data Slice
+        let mapped_frame_data = unsafe {
+            std::slice::from_raw_parts(
+                mapped_resource.pData as *const u8,
+                (self.height * mapped_resource.RowPitch) as usize,
+            )
         };
 
-        Ok(slice)
+        // Create Frame Buffer From Slice
+        let frame_buffer = FrameBuffer::new(mapped_frame_data, self.width, self.height);
+
+        Ok(frame_buffer)
     }
 
     /// Save The Frame As An Image To Specified Path
-    pub fn save_as_image(&mut self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn save_as_image<T: AsRef<Path>>(
+        &mut self,
+        path: T,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let buffer = self.buffer()?;
 
-        let buf = unsafe {
-            std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>(), mem::size_of_val(buffer))
-        };
+        let nopadding_buffer = buffer.as_raw_nopadding_buffer()?; // ArrayView<'a, u8, Dim<[usize; 3]>
 
-        image::save_buffer(path, buf, self.width, self.height, ColorType::Rgba8)?;
+        let (height, width, _) = nopadding_buffer.dim();
+
+        let mut rgba_image: RgbaImage = RgbaImage::new(width as u32, height as u32);
+
+        for y in 0..height {
+            for x in 0..width {
+                let r = nopadding_buffer[(y, x, 0)];
+                let g = nopadding_buffer[(y, x, 1)];
+                let b = nopadding_buffer[(y, x, 2)];
+                let a = nopadding_buffer[(y, x, 3)];
+
+                rgba_image.put_pixel(x as u32, y as u32, Rgba([r, g, b, a]));
+            }
+        }
+
+        rgba_image.save(path)?;
 
         Ok(())
+    }
+}
+
+/// Frame Buffer Struct Used To Get Raw Pixel Data
+pub struct FrameBuffer<'a> {
+    raw_buffer: &'a [u8],
+    width: u32,
+    height: u32,
+}
+
+impl<'a> FrameBuffer<'a> {
+    /// Create A New Frame Buffer
+    #[must_use]
+    pub const fn new(raw_buffer: &'a [u8], width: u32, height: u32) -> Self {
+        Self {
+            raw_buffer,
+            width,
+            height,
+        }
+    }
+
+    /// Get The Frame Buffer Width
+    #[must_use]
+    pub const fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// Get The Frame Buffer Height
+    #[must_use]
+    pub const fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// Get The Frame Buffer Height
+    #[must_use]
+    pub const fn has_padding(&self) -> bool {
+        let raw_buffer = self.as_raw_buffer();
+
+        self.width as usize * 4 != raw_buffer.len() / self.height as usize
+    }
+
+    /// Get The Raw Pixel Data Might Have Padding
+    #[must_use]
+    pub const fn as_raw_buffer(&self) -> &'a [u8] {
+        self.raw_buffer
+    }
+
+    /// Get The Raw Pixel Data Without Padding
+    #[allow(clippy::type_complexity)]
+    pub fn as_raw_nopadding_buffer(
+        &self,
+    ) -> Result<ArrayBase<OwnedRepr<u8>, Dim<[usize; 3]>>, Box<dyn std::error::Error>> {
+        let row_pitch = self.raw_buffer.len() / self.height as usize;
+
+        let array =
+            ArrayView::from_shape((self.height as usize, row_pitch), self.raw_buffer)?.to_owned();
+
+        if self.width as usize * 4 == self.raw_buffer.len() / self.height as usize {
+            let array = array.into_shape((self.height as usize, self.width as usize, 4))?;
+
+            Ok(array)
+        } else {
+            let array = array
+                .slice_move(s![.., ..self.width as usize * 4])
+                .into_shape((self.height as usize, self.width as usize, 4))?;
+
+            Ok(array)
+        }
     }
 }

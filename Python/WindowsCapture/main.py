@@ -1,7 +1,6 @@
-# Python Version Is NOT Complete Yet
-
-
 from windows_capture_native import NativeWindowsCapture
+import ctypes
+import numpy
 
 
 class Capture:
@@ -9,7 +8,7 @@ class Capture:
         self.frame_handler = None
         self.closed_handler = None
         self.capture = NativeWindowsCapture(
-            False, False, self.on_frame_arrived, self.on_closed
+            True, False, self.on_frame_arrived, self.on_closed
         )
         self.capture_cursor = capture_cursor
         self.draw_border = draw_border
@@ -17,9 +16,21 @@ class Capture:
     def start(self):
         self.capture.start()
 
-    def on_frame_arrived(self, frame):
+    def stop(self):
+        self.capture.stop()
+
+    def on_frame_arrived(self, buffer_ptr, width, height, row_pitch):
         if self.frame_handler:
-            self.frame_handler(frame)
+            num_array = numpy.ctypeslib.as_array(
+                ctypes.cast(buffer_ptr, ctypes.POINTER(ctypes.c_uint8)),
+                shape=(height, row_pitch),
+            )
+
+            if row_pitch == width * 4:
+                self.frame_handler(num_array.reshape(height, width, 4))
+            else:
+                self.frame_handler(num_array[:, : width * 4].reshape(height, width, 4))
+
         else:
             raise Exception("on_frame_arrived Event Handler Is Not Set")
 
@@ -43,8 +54,9 @@ capture = Capture(False, False)
 
 
 @capture.event
-def on_frame_arrived(frame):
-    print("on_frame_arrived")
+def on_frame_arrived(frame_bytes):
+    print("lol")
+    capture.stop()
 
 
 @capture.event
