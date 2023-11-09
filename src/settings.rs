@@ -1,11 +1,19 @@
-use thiserror::Error;
+use std::error::Error;
+
 use windows::Graphics::Capture::GraphicsCaptureItem;
 
 /// Used To Handle Settings Errors
-#[derive(Error, Eq, PartialEq, Clone, Copy, Debug)]
+#[derive(thiserror::Error, Eq, PartialEq, Clone, Copy, Debug)]
 pub enum SettingsErrors {
     #[error("Failed To Convert To GraphicsCaptureItem")]
     ConvertFailed,
+}
+
+/// Kind Of Pixel Format For Frame To Have
+#[derive(Eq, PartialEq, Clone, Copy, Debug)]
+pub enum ColorFormat {
+    Rgba8,
+    Bgra8,
 }
 
 /// Capture Settings, None Means Default
@@ -14,6 +22,7 @@ pub struct WindowsCaptureSettings<Flags> {
     pub item: GraphicsCaptureItem,
     pub capture_cursor: Option<bool>,
     pub draw_border: Option<bool>,
+    pub color_format: ColorFormat,
     pub flags: Flags,
 }
 
@@ -23,8 +32,9 @@ impl<Flags> WindowsCaptureSettings<Flags> {
         item: T,
         capture_cursor: Option<bool>,
         draw_border: Option<bool>,
+        color_format: ColorFormat,
         flags: Flags,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         Ok(Self {
             item: match item.try_into() {
                 Ok(item) => item,
@@ -32,6 +42,7 @@ impl<Flags> WindowsCaptureSettings<Flags> {
             },
             capture_cursor,
             draw_border,
+            color_format,
             flags,
         })
     }

@@ -1,5 +1,6 @@
+use std::error::Error;
+
 use log::warn;
-use thiserror::Error;
 use windows::{
     core::HSTRING,
     Graphics::Capture::GraphicsCaptureItem,
@@ -17,7 +18,7 @@ use windows::{
 };
 
 /// Used To Handle Window Errors
-#[derive(Error, Eq, PartialEq, Clone, Copy, Debug)]
+#[derive(thiserror::Error, Eq, PartialEq, Clone, Copy, Debug)]
 pub enum WindowErrors {
     #[error("Failed To Get The Foreground Window")]
     NoActiveWindow,
@@ -33,7 +34,7 @@ pub struct Window {
 
 impl Window {
     /// Get The Currently Active Foreground Window
-    pub fn foreground() -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn foreground() -> Result<Self, Box<dyn Error + Send + Sync>> {
         let window = unsafe { GetForegroundWindow() };
 
         if window.0 == 0 {
@@ -44,7 +45,7 @@ impl Window {
     }
 
     /// Create From A Window Name
-    pub fn from_name(title: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_name(title: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let title = HSTRING::from(title);
         let window = unsafe { FindWindowW(None, &title) };
 
@@ -56,7 +57,7 @@ impl Window {
     }
 
     /// Create From A Window Name Substring
-    pub fn from_contains_name(title: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_contains_name(title: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let windows = Self::enumerate()?;
 
         let mut target_window = None;
@@ -71,7 +72,7 @@ impl Window {
     }
 
     /// Get Window Title
-    pub fn title(&self) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn title(&self) -> Result<String, Box<dyn Error + Send + Sync>> {
         let len = unsafe { GetWindowTextLengthW(self.window) } + 1;
 
         let mut name = vec![0u16; len as usize];
@@ -119,7 +120,7 @@ impl Window {
     }
 
     /// Get A List Of All Windows
-    pub fn enumerate() -> Result<Vec<Self>, Box<dyn std::error::Error>> {
+    pub fn enumerate() -> Result<Vec<Self>, Box<dyn Error + Send + Sync>> {
         let mut windows: Vec<Self> = Vec::new();
 
         unsafe {
@@ -169,7 +170,7 @@ impl Window {
 
 // Automatically Convert Window To GraphicsCaptureItem
 impl TryFrom<Window> for GraphicsCaptureItem {
-    type Error = Box<dyn std::error::Error>;
+    type Error = Box<dyn Error + Send + Sync>;
 
     fn try_from(value: Window) -> Result<Self, Self::Error> {
         // Get Capture Item From HWND

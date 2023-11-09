@@ -1,14 +1,15 @@
-use std::path::Path;
+use std::{error::Error, path::Path};
 
 use image::{Rgba, RgbaImage};
 use ndarray::{s, ArrayBase, ArrayView, Dim, OwnedRepr};
-use thiserror::Error;
 use windows::Win32::Graphics::Direct3D11::{
     ID3D11DeviceContext, ID3D11Texture2D, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ,
 };
 
+use crate::settings::ColorFormat;
+
 /// Used To Handle Frame Errors
-#[derive(Error, Eq, PartialEq, Clone, Copy, Debug)]
+#[derive(thiserror::Error, Eq, PartialEq, Clone, Copy, Debug)]
 pub enum FrameError {
     #[error("Graphics Capture API Is Not Supported")]
     InvalidSize,
@@ -21,6 +22,7 @@ pub struct Frame<'a> {
     context: &'a ID3D11DeviceContext,
     width: u32,
     height: u32,
+    color_format: ColorFormat,
 }
 
 impl<'a> Frame<'a> {
@@ -32,6 +34,7 @@ impl<'a> Frame<'a> {
         context: &'a ID3D11DeviceContext,
         width: u32,
         height: u32,
+        color_format: ColorFormat,
     ) -> Self {
         Self {
             texture,
@@ -39,6 +42,7 @@ impl<'a> Frame<'a> {
             context,
             width,
             height,
+            color_format,
         }
     }
 
@@ -55,7 +59,7 @@ impl<'a> Frame<'a> {
     }
 
     /// Get The Frame Buffer
-    pub fn buffer(&mut self) -> Result<FrameBuffer, Box<dyn std::error::Error>> {
+    pub fn buffer(&mut self) -> Result<FrameBuffer, Box<dyn Error + Send + Sync>> {
         // Copy The Real Texture To Copy Texture
         unsafe {
             self.context
@@ -92,23 +96,35 @@ impl<'a> Frame<'a> {
     pub fn save_as_image<T: AsRef<Path>>(
         &mut self,
         path: T,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let buffer = self.buffer()?;
 
-        let nopadding_buffer = buffer.as_raw_nopadding_buffer()?; // ArrayView<'a, u8, Dim<[usize; 3]>
+        let nopadding_buffer = buffer.as_raw_nopadding_buffer()?;
 
         let (height, width, _) = nopadding_buffer.dim();
-
         let mut rgba_image: RgbaImage = RgbaImage::new(width as u32, height as u32);
 
-        for y in 0..height {
-            for x in 0..width {
-                let r = nopadding_buffer[(y, x, 0)];
-                let g = nopadding_buffer[(y, x, 1)];
-                let b = nopadding_buffer[(y, x, 2)];
-                let a = nopadding_buffer[(y, x, 3)];
+        if self.color_format == ColorFormat::Rgba8 {
+            for y in 0..height {
+                for x in 0..width {
+                    let r = nopadding_buffer[(y, x, 0)];
+                    let g = nopadding_buffer[(y, x, 1)];
+                    let b = nopadding_buffer[(y, x, 2)];
+                    let a = nopadding_buffer[(y, x, 3)];
 
-                rgba_image.put_pixel(x as u32, y as u32, Rgba([r, g, b, a]));
+                    rgba_image.put_pixel(x as u32, y as u32, Rgba([r, g, b, a]));
+                }
+            }
+        } else {
+            for y in 0..height {
+                for x in 0..width {
+                    let b = nopadding_buffer[(y, x, 0)];
+                    let g = nopadding_buffer[(y, x, 1)];
+                    let r = nopadding_buffer[(y, x, 2)];
+                    let a = nopadding_buffer[(y, x, 3)];
+
+                    rgba_image.put_pixel(x as u32, y as u32, Rgba([r, g, b, a]));
+                }
             }
         }
 
@@ -166,7 +182,7 @@ impl<'a> FrameBuffer<'a> {
     #[allow(clippy::type_complexity)]
     pub fn as_raw_nopadding_buffer(
         &self,
-    ) -> Result<ArrayBase<OwnedRepr<u8>, Dim<[usize; 3]>>, Box<dyn std::error::Error>> {
+    ) -> Result<ArrayBase<OwnedRepr<u8>, Dim<[usize; 3]>>, Box<dyn Error + Send + Sync>> {
         let row_pitch = self.raw_buffer.len() / self.height as usize;
 
         let array =

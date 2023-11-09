@@ -1,6 +1,6 @@
 [package]
 name = "windows-capture"
-version = "1.0.23"
+version = "1.0.24"
 authors = ["NiiightmareXD"]
 edition = "2021"
 description = "Fastest Windows Screen Capture Library For Rust 🔥"
@@ -42,9 +42,13 @@ windows = { version = "0.51.1", features = [
     "Win32_System_Com",
 ] }
 
-[workspace]
-members = ["Python/windows-capture-native"]
+[package.metadata.docs.rs]
+default-target = "x86_64-pc-windows-msvc"
+targets = ["x86_64-pc-windows-msvc"]
 
 [[example]]
 name = "basic"
 doc-scrape-examples = false
+
+[workspace]
+members = ["windows-capture-python"]

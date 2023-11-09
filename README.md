@@ -16,7 +16,7 @@ Add this library to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-windows-capture = "1.0.22"
+windows-capture = "1.0.24"
 ```
 or run this command
 
@@ -27,39 +27,53 @@ cargo add windows-capture
 ## Usage
 
 ```rust
+use std::error::Error;
+
 use windows_capture::{
-    capture::WindowsCaptureHandler, frame::Frame, settings::WindowsCaptureSettings, window::Window,
+    capture::WindowsCaptureHandler,
+    frame::Frame,
+    graphics_capture_api::InternalCaptureControl,
+    settings::{ColorFormat, WindowsCaptureSettings},
+    window::Window,
 };
 
+// Struct To Implement Methods For
 struct Capture;
 
 impl WindowsCaptureHandler for Capture {
-    type Flags = String; // To Get The Message (Or A Variable Or ...) From The Settings
+    type Flags = String; // To Get The Message From The Settings
 
-    fn new(message: Self::Flags) -> Self {
-        // Function That Will Be Called To Create The Struct The Flags Can Be Passed
-        // From Settings
+    // Function That Will Be Called To Create The Struct The Flags Can Be Passed
+    // From Settings
+    fn new(message: Self::Flags) -> Result<Self, Box<dyn Error + Send + Sync>> {
         println!("Got The Message: {message}");
 
-        Self {}
+        Ok(Self {})
     }
 
-    fn on_frame_arrived(&mut self, mut frame: Frame) {
-        // Called Every Time A New Frame Is Available
-        println!("Got A New Frame");
+    // Called Every Time A New Frame Is Available
+    fn on_frame_arrived(
+        &mut self,
+        mut frame: Frame,
+        capture_control: InternalCaptureControl,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        println!("New Frame Arrived");
 
         // Save The Frame As An Image To Specified Path
-        frame.save_as_image("image.png").unwrap();
+        frame.save_as_image("image.png")?;
 
-        // Call To Stop The Capture Thread, You Might Receive A Few More Frames
-        // Before It Stops
-        self.stop();
+        // Gracefully Stop The Capture Thread
+        capture_control.stop();
+
+        Ok(())
     }
 
-    fn on_closed(&mut self) {
-        // Called When The Capture Item Closes Usually When The Window Closes,
-        // Capture Will End After This Function Ends
-        println!("Capture Item Closed");
+    // Called When The Capture Item Closes Usually When The Window Closes, Capture
+    // Will End After This Function Ends
+    fn on_closed(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        println!("Capture Session Closed");
+
+        Ok(())
     }
 }
 
@@ -72,13 +86,16 @@ fn main() {
         foreground_window,
         // Capture Cursor
         Some(true),
-        // Draw Border
+        // Draw Borders
         Some(false),
-        // This Will Be Passed To The New Function
+        // Kind Of Pixel Format For Frame To Have
+        ColorFormat::Rgba8,
+        // Will Be Passed To The New Function
         "It Works".to_string(),
     )
     .unwrap();
 
+    // Every Error From on_closed and on_frame_arrived Will End Up Here
     Capture::start(settings).unwrap();
 }
 ```

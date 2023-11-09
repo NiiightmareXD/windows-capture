@@ -1,11 +1,14 @@
-use std::sync::{
-    atomic::{self, AtomicBool},
-    Arc,
+use std::{
+    cell::RefCell,
+    error::Error,
+    sync::{
+        atomic::{self, AtomicBool},
+        Arc,
+    },
 };
 
 use log::{info, trace};
 use parking_lot::Mutex;
-use thiserror::Error;
 use windows::{
     core::{ComInterface, IInspectable, HSTRING},
     Foundation::{Metadata::ApiInformation, TypedEventHandler},
@@ -19,7 +22,7 @@ use windows::{
                 ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_CPU_ACCESS_READ,
                 D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
             },
-            Dxgi::Common::{DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC},
+            Dxgi::Common::{DXGI_FORMAT, DXGI_SAMPLE_DESC},
         },
         System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess,
         UI::WindowsAndMessaging::PostQuitMessage,
@@ -30,10 +33,15 @@ use crate::{
     capture::WindowsCaptureHandler,
     d3d11::{create_d3d_device, create_direct3d_device, SendDirectX},
     frame::Frame,
+    settings::ColorFormat,
 };
 
+thread_local! {
+    pub static RESULT: RefCell<Option<Result<(), Box<dyn Error + Send + Sync>>>> = RefCell::new(Some(Ok(())));
+}
+
 /// Used To Handle Capture Errors
-#[derive(Error, Eq, PartialEq, Clone, Copy, Debug)]
+#[derive(thiserror::Error, Eq, PartialEq, Clone, Copy, Debug)]
 pub enum WindowsCaptureError {
     #[error("Graphics Capture API Is Not Supported")]
     Unsupported,
@@ -43,6 +51,24 @@ pub enum WindowsCaptureError {
     BorderUnsupported,
     #[error("Already Started")]
     AlreadyStarted,
+}
+
+/// Struct Used To Control Capture Thread
+pub struct InternalCaptureControl {
+    stop: Arc<AtomicBool>,
+}
+
+impl InternalCaptureControl {
+    /// Create A New Capture Control Struct
+    #[must_use]
+    pub fn new(stop: Arc<AtomicBool>) -> Self {
+        Self { stop }
+    }
+
+    /// Gracefully Stop The Capture Thread
+    pub fn stop(self) {
+        self.stop.store(true, atomic::Ordering::Relaxed);
+    }
 }
 
 /// Struct Used For Graphics Capture Api
@@ -65,7 +91,8 @@ impl GraphicsCaptureApi {
         callback: T,
         capture_cursor: Option<bool>,
         draw_border: Option<bool>,
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        color_format: ColorFormat,
+    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         // Check Support
         if !ApiInformation::IsApiContractPresentByMajor(
             &HSTRING::from("Windows.Foundation.UniversalApiContract"),
@@ -79,14 +106,16 @@ impl GraphicsCaptureApi {
         let (d3d_device, d3d_device_context) = create_d3d_device()?;
         let direct3d_device = create_direct3d_device(&d3d_device)?;
 
+        let pixel_format = if color_format == ColorFormat::Rgba8 {
+            DirectXPixelFormat::R8G8B8A8UIntNormalized
+        } else {
+            DirectXPixelFormat::B8G8R8A8UIntNormalized
+        };
+
         // Create Frame Pool
         trace!("Creating Frame Pool");
-        let frame_pool = Direct3D11CaptureFramePool::Create(
-            &direct3d_device,
-            DirectXPixelFormat::R8G8B8A8UIntNormalized,
-            1,
-            item.Size()?,
-        )?;
+        let frame_pool =
+            Direct3D11CaptureFramePool::Create(&direct3d_device, pixel_format, 2, item.Size()?)?;
         let frame_pool = Arc::new(frame_pool);
 
         // Create Capture Session
@@ -109,9 +138,15 @@ impl GraphicsCaptureApi {
                 move |_, _| {
                     closed_item.store(true, atomic::Ordering::Relaxed);
 
+                    // To Stop Messge Loop
                     unsafe { PostQuitMessage(0) };
 
-                    callback_closed.lock().on_closed();
+                    // Notify The Struct That The Capture Session Is Closed
+                    let result = callback_closed.lock().on_closed();
+
+                    let _ = RESULT
+                        .replace(Some(result))
+                        .expect("Failed To Replace RESULT");
 
                     Result::Ok(())
                 }
@@ -128,7 +163,7 @@ impl GraphicsCaptureApi {
                 let context = d3d_device_context.clone();
 
                 let mut last_size = item.Size()?;
-                let callback_frame_arrived = callback;
+                let callback_frame_pool = callback;
                 let direct3d_device_recreate = SendDirectX::new(direct3d_device.clone());
 
                 move |frame, _| {
@@ -155,7 +190,7 @@ impl GraphicsCaptureApi {
                     unsafe { frame_surface.GetDesc(&mut desc) }
 
                     // Check Frame Format
-                    if desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM {
+                    if desc.Format.0 as i32 == pixel_format.0 {
                         // Check If The Size Has Been Changed
                         if frame_content_size.Width != last_size.Width
                             || frame_content_size.Height != last_size.Height
@@ -171,8 +206,8 @@ impl GraphicsCaptureApi {
                             frame_pool_recreate
                                 .Recreate(
                                     &direct3d_device_recreate.0,
-                                    DirectXPixelFormat::R8G8B8A8UIntNormalized,
-                                    1,
+                                    pixel_format,
+                                    2,
                                     frame_content_size,
                                 )
                                 .unwrap();
@@ -192,7 +227,7 @@ impl GraphicsCaptureApi {
                             Height: texture_height,
                             MipLevels: 1,
                             ArraySize: 1,
-                            Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+                            Format: DXGI_FORMAT(pixel_format.0 as u32),
                             SampleDesc: DXGI_SAMPLE_DESC {
                                 Count: 1,
                                 Quality: 0,
@@ -214,21 +249,47 @@ impl GraphicsCaptureApi {
                         };
                         let texture = texture.unwrap();
 
+                        // Create A Frame
                         let frame = Frame::new(
                             texture,
                             frame_surface,
                             &context,
                             texture_width,
                             texture_height,
+                            color_format,
                         );
 
-                        // Send The Frame To Trigger Struct
-                        callback_frame_arrived.lock().on_frame_arrived(frame);
-                    } else {
-                        callback_frame_arrived.lock().on_closed();
+                        // Init Internal Capture Control
+                        let stop = Arc::new(AtomicBool::new(false));
+                        let internal_capture_control = InternalCaptureControl::new(stop.clone());
 
-                        unsafe { PostQuitMessage(0) };
+                        // Send The Frame To Trigger Struct
+                        let result = callback_frame_pool
+                            .lock()
+                            .on_frame_arrived(frame, internal_capture_control);
+
+                        if stop.load(atomic::Ordering::Relaxed) || result.is_err() {
+                            let _ = RESULT
+                                .replace(Some(result))
+                                .expect("Failed To Replace RESULT");
+
+                            closed_frame_pool.store(true, atomic::Ordering::Relaxed);
+
+                            // To Stop Messge Loop
+                            unsafe { PostQuitMessage(0) };
+                        }
+                    } else {
                         closed_frame_pool.store(true, atomic::Ordering::Relaxed);
+
+                        // To Stop Messge Loop
+                        unsafe { PostQuitMessage(0) };
+
+                        // Notify The Struct That The Capture Session Is Closed
+                        let result = callback_frame_pool.lock().on_closed();
+
+                        let _ = RESULT
+                            .replace(Some(result))
+                            .expect("Failed To Replace RESULT");
                     }
 
                     Result::Ok(())
@@ -250,7 +311,7 @@ impl GraphicsCaptureApi {
     }
 
     /// Start Capture
-    pub fn start_capture(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub fn start_capture(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         // Check If The Capture Is Already Installed
         if self.active {
             return Err(Box::new(WindowsCaptureError::AlreadyStarted));
@@ -305,7 +366,7 @@ impl GraphicsCaptureApi {
     }
 
     /// Check If Windows Graphics Capture Api Is Supported
-    pub fn is_supported() -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn is_supported() -> Result<bool, Box<dyn Error + Send + Sync>> {
         Ok(ApiInformation::IsApiContractPresentByMajor(
             &HSTRING::from("Windows.Foundation.UniversalApiContract"),
             8,
@@ -313,7 +374,7 @@ impl GraphicsCaptureApi {
     }
 
     /// Check If You Can Toggle The Cursor On Or Off
-    pub fn is_cursor_toggle_supported() -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn is_cursor_toggle_supported() -> Result<bool, Box<dyn Error + Send + Sync>> {
         Ok(ApiInformation::IsPropertyPresent(
             &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
             &HSTRING::from("IsCursorCaptureEnabled"),
@@ -321,7 +382,7 @@ impl GraphicsCaptureApi {
     }
 
     /// Check If You Can Toggle The Border On Or Off
-    pub fn is_border_toggle_supported() -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn is_border_toggle_supported() -> Result<bool, Box<dyn Error + Send + Sync>> {
         Ok(ApiInformation::IsPropertyPresent(
             &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
             &HSTRING::from("IsBorderRequired"),

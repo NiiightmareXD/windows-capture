@@ -1,10 +1,10 @@
 use std::{
+    error::Error,
     os::windows::prelude::AsRawHandle,
     thread::{self, JoinHandle},
 };
 
 use log::{info, trace, warn};
-use thiserror::Error;
 use windows::{
     Foundation::AsyncActionCompletedHandler,
     Win32::{
@@ -28,11 +28,13 @@ use windows::{
 };
 
 use crate::{
-    frame::Frame, graphics_capture_api::GraphicsCaptureApi, settings::WindowsCaptureSettings,
+    frame::Frame,
+    graphics_capture_api::{GraphicsCaptureApi, InternalCaptureControl, RESULT},
+    settings::WindowsCaptureSettings,
 };
 
 /// Used To Handle Capture Control Errors
-#[derive(Error, Eq, PartialEq, Clone, Copy, Debug)]
+#[derive(thiserror::Error, Eq, PartialEq, Clone, Copy, Debug)]
 pub enum CaptureControlError {
     #[error("Failed To Join Thread")]
     FailedToJoin,
@@ -40,22 +42,20 @@ pub enum CaptureControlError {
 
 /// Struct Used To Control Capture Thread
 pub struct CaptureControl {
-    thread_handle: Option<JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>>,
+    thread_handle: Option<JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>>,
 }
 
 impl CaptureControl {
     /// Create A New Capture Control Struct
     #[must_use]
-    pub fn new(
-        thread_handle: JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
-    ) -> Self {
+    pub fn new(thread_handle: JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>) -> Self {
         Self {
             thread_handle: Some(thread_handle),
         }
     }
 
     /// Wait Until The Thread Stops
-    pub fn wait(mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub fn wait(mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         if let Some(thread_handle) = self.thread_handle.take() {
             match thread_handle.join() {
                 Ok(result) => result?,
@@ -69,7 +69,7 @@ impl CaptureControl {
     }
 
     /// Gracefully Stop The Capture Thread
-    pub fn stop(mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub fn stop(mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         if let Some(thread_handle) = self.thread_handle.take() {
             let handle = thread_handle.as_raw_handle();
             let handle = HANDLE(handle as isize);
@@ -108,12 +108,13 @@ impl CaptureControl {
 
 /// Event Handler Trait
 pub trait WindowsCaptureHandler: Sized {
+    /// To Get The Message From The Settings
     type Flags;
 
     /// Starts The Capture And Takes Control Of The Current Thread
     fn start(
         settings: WindowsCaptureSettings<Self::Flags>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+    ) -> Result<(), Box<dyn Error + Send + Sync>>
     where
         Self: Send + 'static,
         <Self as WindowsCaptureHandler>::Flags: Send,
@@ -137,12 +138,13 @@ pub trait WindowsCaptureHandler: Sized {
 
         // Start Capture
         info!("Starting Capture Thread");
-        let trigger = Self::new(settings.flags);
+        let trigger = Self::new(settings.flags)?;
         let mut capture = GraphicsCaptureApi::new(
             settings.item,
             trigger,
             settings.capture_cursor,
             settings.draw_border,
+            settings.color_format,
         )?;
         capture.start_capture()?;
 
@@ -184,6 +186,12 @@ pub trait WindowsCaptureHandler: Sized {
         trace!("Uninitializing COM");
         unsafe { CoUninitialize() };
 
+        // Check RESULT
+        trace!("Checking RESULT");
+        let result = RESULT.take().expect("Failed To Take RESULT");
+
+        result?;
+
         Ok(())
     }
 
@@ -200,14 +208,18 @@ pub trait WindowsCaptureHandler: Sized {
 
     /// Function That Will Be Called To Create The Struct The Flags Can Be
     /// Passed From Settings
-    fn new(flags: Self::Flags) -> Self;
+    fn new(flags: Self::Flags) -> Result<Self, Box<dyn Error + Send + Sync>>;
 
     /// Called Every Time A New Frame Is Available
-    fn on_frame_arrived(&mut self, frame: Frame);
+    fn on_frame_arrived(
+        &mut self,
+        frame: Frame,
+        capture_control: InternalCaptureControl,
+    ) -> Result<(), Box<dyn Error + Send + Sync>>;
 
     /// Called When The Capture Item Closes Usually When The Window Closes,
     /// Capture Will End After This Function Ends
-    fn on_closed(&mut self);
+    fn on_closed(&mut self) -> Result<(), Box<dyn Error + Send + Sync>>;
 
     /// Call To Stop The Capture Thread, You Might Receive A Few More Frames
     /// Before It Stops

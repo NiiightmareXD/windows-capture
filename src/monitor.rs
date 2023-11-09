@@ -1,4 +1,5 @@
-use thiserror::Error;
+use std::error::Error;
+
 use windows::{
     Graphics::Capture::GraphicsCaptureItem,
     Win32::{
@@ -11,7 +12,7 @@ use windows::{
 };
 
 /// Used To Handle Monitor Errors
-#[derive(Error, Eq, PartialEq, Clone, Copy, Debug)]
+#[derive(thiserror::Error, Eq, PartialEq, Clone, Copy, Debug)]
 pub enum MonitorErrors {
     #[error("Failed To Find Monitor")]
     NotFound,
@@ -34,7 +35,7 @@ impl Monitor {
     }
 
     /// Get The Monitor From It's Index
-    pub fn from_index(index: usize) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_index(index: usize) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let monitor = Self::enumerate()?;
         let monitor = match monitor.get(index) {
             Some(monitor) => *monitor,
@@ -45,7 +46,7 @@ impl Monitor {
     }
 
     /// Get A List Of All Monitors
-    pub fn enumerate() -> Result<Vec<HMONITOR>, Box<dyn std::error::Error>> {
+    pub fn enumerate() -> Result<Vec<HMONITOR>, Box<dyn Error + Send + Sync>> {
         let mut monitors: Vec<HMONITOR> = Vec::new();
 
         unsafe {
@@ -90,7 +91,7 @@ impl Monitor {
 
 // Automatically Convert Monitor To GraphicsCaptureItem
 impl TryFrom<Monitor> for GraphicsCaptureItem {
-    type Error = Box<dyn std::error::Error>;
+    type Error = Box<dyn Error + Send + Sync>;
 
     fn try_from(value: Monitor) -> Result<Self, Self::Error> {
         // Get Capture Item From HMONITOR
