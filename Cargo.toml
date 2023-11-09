@@ -44,3 +44,7 @@ windows = { version = "0.51.1", features = [
 
 [workspace]
 members = ["Python/windows-capture-native"]
+
+[[example]]
+name = "basic"
+doc-scrape-examples = false
