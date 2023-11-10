@@ -1,6 +1,6 @@
 [package]
 name = "windows-capture"
-version = "1.0.26"
+version = "1.0.27"
 authors = ["NiiightmareXD"]
 edition = "2021"
 description = "Fastest Windows Screen Capture Library For Rust 🔥"
@@ -38,7 +38,6 @@ windows = { version = "0.51.1", features = [
     "System",
     "Graphics_DirectX_Direct3D11",
     "Foundation_Metadata",
-    "Win32_UI_HiDpi",
     "Win32_System_Com",
 ] }
 

@@ -5,6 +5,7 @@ use std::{
         atomic::{self, AtomicBool},
         Arc,
     },
+    time::Instant,
 };
 
 use log::{info, trace};
@@ -167,6 +168,8 @@ impl GraphicsCaptureApi {
                 let direct3d_device_recreate = SendDirectX::new(direct3d_device.clone());
 
                 move |frame, _| {
+                    let instant = Instant::now();
+
                     // Return Early If The Capture Is Closed
                     if closed_frame_pool.load(atomic::Ordering::Relaxed) {
                         return Ok(());
@@ -292,6 +295,7 @@ impl GraphicsCaptureApi {
                             .expect("Failed To Replace RESULT");
                     }
 
+                    println!("Took: {}", instant.elapsed().as_nanos() as f64 / 1000000.0);
                     Result::Ok(())
                 }
             }),

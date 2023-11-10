@@ -17,12 +17,9 @@ use windows::{
                 DQTYPE_THREAD_CURRENT,
             },
         },
-        UI::{
-            HiDpi::{SetProcessDpiAwareness, PROCESS_PER_MONITOR_DPI_AWARE},
-            WindowsAndMessaging::{
-                DispatchMessageW, GetMessageW, PostQuitMessage, PostThreadMessageW,
-                TranslateMessage, MSG, WM_QUIT,
-            },
+        UI::WindowsAndMessaging::{
+            DispatchMessageW, GetMessageW, PostQuitMessage, PostThreadMessageW, TranslateMessage,
+            MSG, WM_QUIT,
         },
     },
 };
@@ -122,10 +119,6 @@ pub trait WindowsCaptureHandler: Sized {
         // Initialize COM
         trace!("Initializing COM");
         unsafe { CoInitializeEx(None, COINIT_MULTITHREADED | COINIT_SPEED_OVER_MEMORY)? };
-
-        // Set DPI Awarness
-        trace!("Setting DPI Awarness");
-        unsafe { SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE)? };
 
         // Create A Dispatcher Queue For Current Thread
         trace!("Creating A Dispatcher Queue For Capture Thread");
