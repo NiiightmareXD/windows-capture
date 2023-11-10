@@ -218,7 +218,7 @@ pub trait WindowsCaptureHandler: Sized {
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
 
     /// Called When The Capture Item Closes Usually When The Window Closes,
-    /// Capture Will End After This Function Ends
+    /// Capture Session Will End After This Function Ends
     fn on_closed(&mut self) -> Result<(), Box<dyn Error + Send + Sync>>;
 
     /// Call To Stop The Capture Thread, You Might Receive A Few More Frames

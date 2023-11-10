@@ -1,6 +1,6 @@
 [package]
 name = "windows-capture"
-version = "1.0.24"
+version = "1.0.26"
 authors = ["NiiightmareXD"]
 edition = "2021"
 description = "Fastest Windows Screen Capture Library For Rust 🔥"

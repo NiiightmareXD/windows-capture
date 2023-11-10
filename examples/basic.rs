@@ -40,7 +40,7 @@ impl WindowsCaptureHandler for Capture {
     }
 
     // Called When The Capture Item Closes Usually When The Window Closes, Capture
-    // Will End After This Function Ends
+    // Session Will End After This Function Ends
     fn on_closed(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         println!("Capture Session Closed");
 
