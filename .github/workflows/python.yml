@@ -17,6 +17,6 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Build
-      run: cargo build -p windows-capture-native --verbose
+      run: cargo build -p windows-capture-python --verbose
     - name: Run tests
-      run: cargo test -p windows-capture-native --verbose
+      run: cargo test -p windows-capture-python --verbose
