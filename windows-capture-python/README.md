@@ -1,7 +1,7 @@
 # Windows Capture
 ![Crates.io](https://img.shields.io/crates/l/windows-capture) ![GitHub Workflow Status (with event)](https://img.shields.io/github/actions/workflow/status/NiiightmareXD/windows-capture/rust.yml) ![PyPI - Version](https://img.shields.io/pypi/v/windows-capture)
 
-**Windows Capture** is a highly efficient Rust and Python library that enables you to effortlessly capture the screen using the Graphics Capture API. This library allows you to easily capture the screen of your Windows-based computer and use it for various purposes, such as creating instructional videos, taking screenshots, or recording your gameplay. With its intuitive interface and robust functionality, Windows-Capture is an excellent choice for anyone looking for a reliable and easy-to-use screen capturing solution.
+**Windows Capture** is a highly efficient Rust and Python library that enables you to capture the screen using the Graphics Capture API effortlessly. This library allows you to easily capture the screen of your Windows-based computer and use it for various purposes, such as creating instructional videos, taking screenshots, or recording your gameplay. With its intuitive interface and robust functionality, Windows Capture is an excellent choice for anyone looking for a reliable, easy-to-use screen-capturing solution.
 
 **Note** this README.md is for [Python library](https://github.com/NiiightmareXD/windows-capture/tree/main/windows-capture-python) Rust library can be found [here](https://github.com/NiiightmareXD/windows-capture)  
 
@@ -39,7 +39,7 @@ capture = WindowsCapture(
 def on_frame_arrived(frame: Frame, capture_control: CaptureControl):
     print("New Frame Arrived")
 
-    # Save The Frame As An Image To Specified Path
+    # Save The Frame As An Image To The Specified Path
     frame.save_as_image("image.png")
 
     # Gracefully Stop The Capture Thread
@@ -55,6 +55,12 @@ def on_closed():
 
 capture.start()
 ```
+
+## Benchmark
+
+Windows Capture Is The Fastest Python Screen Capture Library
+
+![Benchmark Showing Windows Capture Is The Fastest Python Screen Capture Library](https://github.com/NiiightmareXD/windows-capture/assets/90005793/444fa93e-5e27-48c8-8eb6-b9e21ab26452)
 
 ## Contributing
 
