@@ -26,7 +26,7 @@ class Frame:
     Methods
     -------
     save_as_image(path: str):
-        Saves The Frame As An Image To Specified Path
+        Saves The Frame As An Image To The Specified Path
     to_bgr() -> "Frame":
         Converts The self.frame_buffer Pixel Type To Bgr Instead Of Bgra
     crop(
@@ -42,7 +42,7 @@ class Frame:
         self.height = height
 
     def save_as_image(self, path: str) -> None:
-        """Save The Frame As An Image To Specified Path"""
+        """Save The Frame As An Image To The Specified Path"""
         cv2.imwrite(path, self.frame_buffer)
 
     def convert_to_bgr(self) -> "Frame":

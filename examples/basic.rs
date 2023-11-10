@@ -30,7 +30,7 @@ impl WindowsCaptureHandler for Capture {
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         println!("New Frame Arrived");
 
-        // Save The Frame As An Image To Specified Path
+        // Save The Frame As An Image To The Specified Path
         frame.save_as_image("image.png")?;
 
         // Gracefully Stop The Capture Thread

@@ -92,7 +92,7 @@ impl<'a> Frame<'a> {
         Ok(frame_buffer)
     }
 
-    /// Save The Frame As An Image To Specified Path
+    /// Save The Frame As An Image To The Specified Path
     pub fn save_as_image<T: AsRef<Path>>(
         &mut self,
         path: T,
