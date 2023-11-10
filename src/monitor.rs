@@ -26,12 +26,15 @@ pub struct Monitor {
 
 impl Monitor {
     /// Get The Primary Monitor
-    #[must_use]
-    pub fn primary() -> Self {
+    pub fn primary() -> Result<Self, Box<dyn Error + Send + Sync>> {
         let point = POINT { x: 0, y: 0 };
         let monitor = unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY) };
 
-        Self { monitor }
+        if monitor.is_invalid() {
+            return Err(Box::new(MonitorErrors::NotFound));
+        }
+
+        Ok(Self { monitor })
     }
 
     /// Get The Monitor From It's Index
