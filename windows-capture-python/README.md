@@ -59,6 +59,7 @@ capture.start()
 ## Benchmark
 
 Windows Capture Is The Fastest Python Screen Capture Library
+
 ![Benchmark Showing Windows Capture Is The Fastest Python Screen Capture Library](https://github.com/NiiightmareXD/windows-capture/assets/90005793/444fa93e-5e27-48c8-8eb6-b9e21ab26452)
 
 ## Contributing
