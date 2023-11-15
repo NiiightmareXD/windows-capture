@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{error::Error, ptr};
 
 use windows::{
     Graphics::Capture::GraphicsCaptureItem,
@@ -57,7 +57,7 @@ impl Monitor {
                 None,
                 None,
                 Some(Self::enum_monitors_callback),
-                LPARAM(std::ptr::addr_of_mut!(monitors) as isize),
+                LPARAM(ptr::addr_of_mut!(monitors) as isize),
             )
             .ok()?;
         };

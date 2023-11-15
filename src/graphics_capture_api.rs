@@ -17,12 +17,8 @@ use windows::{
         DirectX::{Direct3D11::IDirect3DDevice, DirectXPixelFormat},
     },
     Win32::{
-        Graphics::{
-            Direct3D11::{
-                ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_CPU_ACCESS_READ,
-                D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
-            },
-            Dxgi::Common::{DXGI_FORMAT, DXGI_SAMPLE_DESC},
+        Graphics::Direct3D11::{
+            ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_TEXTURE2D_DESC,
         },
         System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess,
         UI::WindowsAndMessaging::PostQuitMessage,
@@ -86,7 +82,7 @@ pub struct GraphicsCaptureApi {
 
 impl GraphicsCaptureApi {
     /// Create A New Graphics Capture Api Struct
-    pub fn new<T: WindowsCaptureHandler + std::marker::Send + 'static>(
+    pub fn new<T: WindowsCaptureHandler + Send + 'static>(
         item: GraphicsCaptureItem,
         callback: T,
         capture_cursor: Option<bool>,
@@ -189,107 +185,64 @@ impl GraphicsCaptureApi {
                     let mut desc = D3D11_TEXTURE2D_DESC::default();
                     unsafe { frame_surface.GetDesc(&mut desc) }
 
-                    // Check Frame Format
-                    if desc.Format.0 as i32 == pixel_format.0 {
-                        // Check If The Size Has Been Changed
-                        if frame_content_size.Width != last_size.Width
-                            || frame_content_size.Height != last_size.Height
-                        {
-                            info!(
-                                "Size Changed From {}x{} to {}x{} -> Recreating Device",
-                                last_size.Width,
-                                last_size.Height,
-                                frame_content_size.Width,
-                                frame_content_size.Height,
-                            );
-                            let direct3d_device_recreate = &direct3d_device_recreate;
-                            frame_pool_recreate
-                                .Recreate(
-                                    &direct3d_device_recreate.0,
-                                    pixel_format,
-                                    2,
-                                    frame_content_size,
-                                )
-                                .unwrap();
-
-                            last_size = frame_content_size;
-
-                            return Ok(());
-                        }
-
-                        // Set Width & Height
-                        let texture_width = desc.Width;
-                        let texture_height = desc.Height;
-
-                        // Texture Settings
-                        let texture_desc = D3D11_TEXTURE2D_DESC {
-                            Width: texture_width,
-                            Height: texture_height,
-                            MipLevels: 1,
-                            ArraySize: 1,
-                            Format: DXGI_FORMAT(pixel_format.0 as u32),
-                            SampleDesc: DXGI_SAMPLE_DESC {
-                                Count: 1,
-                                Quality: 0,
-                            },
-                            Usage: D3D11_USAGE_STAGING,
-                            BindFlags: 0,
-                            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
-                            MiscFlags: 0,
-                        };
-
-                        // Create A Texture That CPU Can Read
-                        let mut texture = None;
-                        unsafe {
-                            d3d_device_frame_pool.CreateTexture2D(
-                                &texture_desc,
-                                None,
-                                Some(&mut texture),
-                            )?;
-                        };
-                        let texture = texture.unwrap();
-
-                        // Create A Frame
-                        let frame = Frame::new(
-                            texture,
-                            frame_surface,
-                            &context,
-                            texture_width,
-                            texture_height,
-                            color_format,
+                    // Check If The Size Has Been Changed
+                    if frame_content_size.Width != last_size.Width
+                        || frame_content_size.Height != last_size.Height
+                    {
+                        info!(
+                            "Size Changed From {}x{} to {}x{} -> Recreating Device",
+                            last_size.Width,
+                            last_size.Height,
+                            frame_content_size.Width,
+                            frame_content_size.Height,
                         );
+                        let direct3d_device_recreate = &direct3d_device_recreate;
+                        frame_pool_recreate
+                            .Recreate(
+                                &direct3d_device_recreate.0,
+                                pixel_format,
+                                2,
+                                frame_content_size,
+                            )
+                            .unwrap();
 
-                        // Init Internal Capture Control
-                        let stop = Arc::new(AtomicBool::new(false));
-                        let internal_capture_control = InternalCaptureControl::new(stop.clone());
+                        last_size = frame_content_size;
 
-                        // Send The Frame To Trigger Struct
-                        let result = callback_frame_pool
-                            .lock()
-                            .on_frame_arrived(frame, internal_capture_control);
+                        return Ok(());
+                    }
 
-                        if stop.load(atomic::Ordering::Relaxed) || result.is_err() {
-                            let _ = RESULT
-                                .replace(Some(result))
-                                .expect("Failed To Replace RESULT");
+                    // Set Width & Height
+                    let texture_width = desc.Width;
+                    let texture_height = desc.Height;
 
-                            closed_frame_pool.store(true, atomic::Ordering::Relaxed);
+                    // Create A Frame
+                    let frame = Frame::new(
+                        &d3d_device_frame_pool,
+                        frame_surface,
+                        &context,
+                        texture_width,
+                        texture_height,
+                        color_format,
+                    );
 
-                            // To Stop Messge Loop
-                            unsafe { PostQuitMessage(0) };
-                        }
-                    } else {
+                    // Init Internal Capture Control
+                    let stop = Arc::new(AtomicBool::new(false));
+                    let internal_capture_control = InternalCaptureControl::new(stop.clone());
+
+                    // Send The Frame To Trigger Struct
+                    let result = callback_frame_pool
+                        .lock()
+                        .on_frame_arrived(frame, internal_capture_control);
+
+                    if stop.load(atomic::Ordering::Relaxed) || result.is_err() {
+                        let _ = RESULT
+                            .replace(Some(result))
+                            .expect("Failed To Replace RESULT");
+
                         closed_frame_pool.store(true, atomic::Ordering::Relaxed);
 
                         // To Stop Messge Loop
                         unsafe { PostQuitMessage(0) };
-
-                        // Notify The Struct That The Capture Session Is Closed
-                        let result = callback_frame_pool.lock().on_closed();
-
-                        let _ = RESULT
-                            .replace(Some(result))
-                            .expect("Failed To Replace RESULT");
                     }
 
                     Result::Ok(())
@@ -390,7 +343,7 @@ impl GraphicsCaptureApi {
     }
 }
 
-// Close Screen Capture And Deallocate Memory
+// Close Capture Session
 impl Drop for GraphicsCaptureApi {
     fn drop(&mut self) {
         if let Some(frame_pool) = self.frame_pool.take() {

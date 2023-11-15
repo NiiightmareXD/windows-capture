@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{error::Error, ptr};
 
 use log::warn;
 use windows::{
@@ -127,7 +127,7 @@ impl Window {
             EnumChildWindows(
                 GetDesktopWindow(),
                 Some(Self::enum_windows_callback),
-                LPARAM(std::ptr::addr_of_mut!(windows) as isize),
+                LPARAM(ptr::addr_of_mut!(windows) as isize),
             )
             .ok()?;
         };

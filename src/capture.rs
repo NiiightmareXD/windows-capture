@@ -1,5 +1,6 @@
 use std::{
     error::Error,
+    mem,
     os::windows::prelude::AsRawHandle,
     thread::{self, JoinHandle},
 };
@@ -123,7 +124,7 @@ pub trait WindowsCaptureHandler: Sized {
         // Create A Dispatcher Queue For Current Thread
         trace!("Creating A Dispatcher Queue For Capture Thread");
         let options = DispatcherQueueOptions {
-            dwSize: std::mem::size_of::<DispatcherQueueOptions>() as u32,
+            dwSize: mem::size_of::<DispatcherQueueOptions>() as u32,
             threadType: DQTYPE_THREAD_CURRENT,
             apartmentType: DQTAT_COM_NONE,
         };
