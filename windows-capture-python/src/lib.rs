@@ -10,23 +10,75 @@
 use std::{error::Error, sync::Arc};
 
 use ::windows_capture::{
-    capture::WindowsCaptureHandler,
+    capture::{CaptureControl, WindowsCaptureHandler},
     frame::Frame,
     graphics_capture_api::InternalCaptureControl,
     monitor::Monitor,
     settings::{ColorFormat, WindowsCaptureSettings},
     window::Window,
 };
-use log::{error, info};
 use pyo3::{exceptions::PyException, prelude::*, types::PyList};
 
 /// Fastest Windows Screen Capture Library For Python 🔥.
 #[pymodule]
 fn windows_capture(_py: Python, m: &PyModule) -> PyResult<()> {
-    pyo3_log::init();
-
+    m.add_class::<NativeCaptureControl>()?;
     m.add_class::<NativeWindowsCapture>()?;
     Ok(())
+}
+
+/// Internal Struct Used To Handle Free Threaded Start
+#[pyclass]
+pub struct NativeCaptureControl {
+    capture_control: Option<CaptureControl>,
+}
+
+impl NativeCaptureControl {
+    const fn new(capture_control: CaptureControl) -> Self {
+        Self {
+            capture_control: Some(capture_control),
+        }
+    }
+}
+
+#[pymethods]
+impl NativeCaptureControl {
+    #[must_use]
+    pub fn is_finished(&self) -> bool {
+        self.capture_control
+            .as_ref()
+            .map_or(true, |capture_control| capture_control.is_finished())
+    }
+
+    pub fn wait(&mut self) -> PyResult<()> {
+        if let Some(capture_control) = self.capture_control.take() {
+            match capture_control.wait() {
+                Ok(_) => (),
+                Err(e) => {
+                    return Err(PyException::new_err(format!(
+                        "Failed To Join The Capture Thread -> {e}"
+                    )));
+                }
+            };
+        }
+
+        Ok(())
+    }
+
+    pub fn stop(&mut self) -> PyResult<()> {
+        if let Some(capture_control) = self.capture_control.take() {
+            match capture_control.stop() {
+                Ok(_) => (),
+                Err(e) => {
+                    return Err(PyException::new_err(format!(
+                        "Failed To Stop The Capture Thread -> {e}"
+                    )));
+                }
+            };
+        }
+
+        Ok(())
+    }
 }
 
 /// Internal Struct Used For Windows Capture
@@ -42,7 +94,6 @@ pub struct NativeWindowsCapture {
 
 #[pymethods]
 impl NativeWindowsCapture {
-    /// Create A New Windows Capture Struct
     #[new]
     pub fn new(
         on_frame_arrived_callback: PyObject,
@@ -143,6 +194,70 @@ impl NativeWindowsCapture {
 
         Ok(())
     }
+
+    /// Start Capture On A Dedicated Thread
+    pub fn start_free_thread(&mut self) -> PyResult<NativeCaptureControl> {
+        let settings = if self.window_name.is_some() {
+            let window = match Window::from_contains_name(self.window_name.as_ref().unwrap()) {
+                Ok(window) => window,
+                Err(e) => {
+                    return Err(PyException::new_err(format!(
+                        "Failed To Find Window -> {e}"
+                    )));
+                }
+            };
+
+            match WindowsCaptureSettings::new(
+                window,
+                Some(self.capture_cursor),
+                Some(self.draw_border),
+                ColorFormat::Bgra8,
+                (
+                    self.on_frame_arrived_callback.clone(),
+                    self.on_closed.clone(),
+                ),
+            ) {
+                Ok(settings) => settings,
+                Err(e) => {
+                    return Err(PyException::new_err(format!(
+                        "Failed To Create Windows Capture Settings -> {e}"
+                    )));
+                }
+            }
+        } else {
+            let monitor = match Monitor::from_index(self.monitor_index.unwrap()) {
+                Ok(monitor) => monitor,
+                Err(e) => {
+                    return Err(PyException::new_err(format!(
+                        "Failed To Get Monitor From Index -> {e}"
+                    )));
+                }
+            };
+
+            match WindowsCaptureSettings::new(
+                monitor,
+                Some(self.capture_cursor),
+                Some(self.draw_border),
+                ColorFormat::Bgra8,
+                (
+                    self.on_frame_arrived_callback.clone(),
+                    self.on_closed.clone(),
+                ),
+            ) {
+                Ok(settings) => settings,
+                Err(e) => {
+                    return Err(PyException::new_err(format!(
+                        "Failed To Create Windows Capture Settings -> {e}"
+                    )));
+                }
+            }
+        };
+
+        let capture_control = InnerNativeWindowsCapture::start_free_threaded(settings);
+        let capture_control = NativeCaptureControl::new(capture_control);
+
+        Ok(capture_control)
+    }
 }
 
 struct InnerNativeWindowsCapture {
@@ -169,28 +284,12 @@ impl WindowsCaptureHandler for InnerNativeWindowsCapture {
     ) -> Result<(), Box<(dyn Error + Send + Sync)>> {
         let width = frame.width();
         let height = frame.height();
-        let buf = match frame.buffer() {
-            Ok(buf) => buf,
-            Err(e) => {
-                error!(
-                    "Failed To Get Frame Buffer -> {e} -> Gracefully Stopping The Capture Thread"
-                );
-                capture_control.stop();
-                return Ok(());
-            }
-        };
+        let buf = frame.buffer()?;
 
         let buf = buf.as_raw_buffer();
 
         Python::with_gil(|py| -> PyResult<()> {
-            match py.check_signals() {
-                Ok(_) => (),
-                Err(_) => {
-                    info!("KeyboardInterrupt Detected -> Gracefully Stopping The Capture Thread");
-                    capture_control.stop();
-                    return Ok(());
-                }
-            }
+            py.check_signals()?;
 
             let stop_list = PyList::new(py, [false]);
             self.on_frame_arrived_callback.call1(

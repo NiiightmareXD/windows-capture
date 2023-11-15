@@ -52,6 +52,14 @@ impl CaptureControl {
         }
     }
 
+    /// Check If Capture Thread Is Finished
+    #[must_use]
+    pub fn is_finished(&self) -> bool {
+        self.thread_handle
+            .as_ref()
+            .map_or(true, |thread_handle| thread_handle.is_finished())
+    }
+
     /// Wait Until The Thread Stops
     pub fn wait(mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         if let Some(thread_handle) = self.thread_handle.take() {
