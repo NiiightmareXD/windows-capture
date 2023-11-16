@@ -23,7 +23,7 @@ pip install windows-capture
 ## Usage
 
 ```python
-from windows_capture import WindowsCapture, Frame, CaptureControl
+from windows_capture import WindowsCapture, Frame, InternalCaptureControl
 
 # Every Error From on_closed and on_frame_arrived Will End Up Here
 capture = WindowsCapture(
@@ -36,7 +36,7 @@ capture = WindowsCapture(
 
 # Called Every Time A New Frame Is Available
 @capture.event
-def on_frame_arrived(frame: Frame, capture_control: CaptureControl):
+def on_frame_arrived(frame: Frame, capture_control: InternalCaptureControl):
     print("New Frame Arrived")
 
     # Save The Frame As An Image To The Specified Path
@@ -48,7 +48,7 @@ def on_frame_arrived(frame: Frame, capture_control: CaptureControl):
 
 # Called When The Capture Item Closes Usually When The Window Closes, Capture
 # Session Will End After This Function Ends
-@capture.on_closed
+@capture.event
 def on_closed():
     print("Capture Session Closed")
 

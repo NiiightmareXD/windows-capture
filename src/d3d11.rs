@@ -12,7 +12,7 @@ use windows::{
             },
             Direct3D11::{
                 D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext,
-                D3D11_CREATE_DEVICE_DISABLE_GPU_TIMEOUT, D3D11_SDK_VERSION,
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION,
             },
             Dxgi::IDXGIDevice,
         },
@@ -40,8 +40,8 @@ pub enum DirectXErrors {
 }
 
 /// Create ID3D11Device And ID3D11DeviceContext
-pub fn create_d3d_device()
--> Result<(ID3D11Device, ID3D11DeviceContext), Box<dyn Error + Send + Sync>> {
+pub fn create_d3d_device(
+) -> Result<(ID3D11Device, ID3D11DeviceContext), Box<dyn Error + Send + Sync>> {
     // Set Feature Flags
     let feature_flags = [
         D3D_FEATURE_LEVEL_11_1,
@@ -62,7 +62,7 @@ pub fn create_d3d_device()
             None,
             D3D_DRIVER_TYPE_HARDWARE,
             None,
-            D3D11_CREATE_DEVICE_DISABLE_GPU_TIMEOUT,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
             Some(&feature_flags),
             D3D11_SDK_VERSION,
             Some(&mut d3d_device),

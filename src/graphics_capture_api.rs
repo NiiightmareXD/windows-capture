@@ -75,6 +75,7 @@ pub struct GraphicsCaptureApi {
     _d3d_device_context: ID3D11DeviceContext,
     frame_pool: Option<Arc<Direct3D11CaptureFramePool>>,
     session: Option<GraphicsCaptureSession>,
+    closed: Arc<AtomicBool>,
     active: bool,
     capture_cursor: Option<bool>,
     draw_border: Option<bool>,
@@ -154,7 +155,7 @@ impl GraphicsCaptureApi {
             &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new({
                 // Init
                 let frame_pool_recreate = frame_pool.clone();
-                let closed_frame_pool = closed;
+                let closed_frame_pool = closed.clone();
                 let d3d_device_frame_pool = d3d_device.clone();
                 let context = d3d_device_context.clone();
 
@@ -257,6 +258,7 @@ impl GraphicsCaptureApi {
             _d3d_device_context: d3d_device_context,
             frame_pool: Some(frame_pool),
             session: Some(session),
+            closed,
             active: false,
             capture_cursor,
             draw_border,
@@ -316,6 +318,12 @@ impl GraphicsCaptureApi {
         if let Some(session) = self.session.take() {
             session.Close().expect("Failed to Close Capture Session");
         }
+    }
+
+    /// Get Halt Handle
+    #[must_use]
+    pub fn halt_handle(&self) -> Arc<AtomicBool> {
+        self.closed.clone()
     }
 
     /// Check If Windows Graphics Capture Api Is Supported

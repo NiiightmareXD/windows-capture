@@ -50,32 +50,42 @@ impl NativeCaptureControl {
             .map_or(true, |capture_control| capture_control.is_finished())
     }
 
-    pub fn wait(&mut self) -> PyResult<()> {
-        if let Some(capture_control) = self.capture_control.take() {
-            match capture_control.wait() {
-                Ok(_) => (),
-                Err(e) => {
-                    return Err(PyException::new_err(format!(
-                        "Failed To Join The Capture Thread -> {e}"
-                    )));
-                }
-            };
-        }
+    pub fn wait(&mut self, py: Python) -> PyResult<()> {
+        // But Honestly WTF Is This? You Know How Much Time It Took Me To Debug This? Just Why? Who Decided This BS Threading Shit?
+        py.allow_threads(|| {
+            if let Some(capture_control) = self.capture_control.take() {
+                match capture_control.wait() {
+                    Ok(_) => (),
+                    Err(e) => {
+                        return Err(PyException::new_err(format!(
+                            "Failed To Join The Capture Thread -> {e}"
+                        )));
+                    }
+                };
+            }
+
+            Ok(())
+        })?;
 
         Ok(())
     }
 
-    pub fn stop(&mut self) -> PyResult<()> {
-        if let Some(capture_control) = self.capture_control.take() {
-            match capture_control.stop() {
-                Ok(_) => (),
-                Err(e) => {
-                    return Err(PyException::new_err(format!(
-                        "Failed To Stop The Capture Thread -> {e}"
-                    )));
-                }
-            };
-        }
+    pub fn stop(&mut self, py: Python) -> PyResult<()> {
+        // But Honestly WTF Is This? You Know How Much Time It Took Me To Debug This? Just Why? Who Decided This BS Threading Shit?
+        py.allow_threads(|| {
+            if let Some(capture_control) = self.capture_control.take() {
+                match capture_control.stop() {
+                    Ok(_) => (),
+                    Err(e) => {
+                        return Err(PyException::new_err(format!(
+                            "Failed To Stop The Capture Thread -> {e}"
+                        )));
+                    }
+                };
+            }
+
+            Ok(())
+        })?;
 
         Ok(())
     }
@@ -196,7 +206,7 @@ impl NativeWindowsCapture {
     }
 
     /// Start Capture On A Dedicated Thread
-    pub fn start_free_thread(&mut self) -> PyResult<NativeCaptureControl> {
+    pub fn start_free_threaded(&mut self) -> PyResult<NativeCaptureControl> {
         let settings = if self.window_name.is_some() {
             let window = match Window::from_contains_name(self.window_name.as_ref().unwrap()) {
                 Ok(window) => window,
@@ -253,7 +263,14 @@ impl NativeWindowsCapture {
             }
         };
 
-        let capture_control = InnerNativeWindowsCapture::start_free_threaded(settings);
+        let capture_control = match InnerNativeWindowsCapture::start_free_threaded(settings) {
+            Ok(capture_control) => capture_control,
+            Err(e) => {
+                return Err(PyException::new_err(format!(
+                    "Failed To Start Capture Session On A Dedicated Thread -> {e}"
+                )))
+            }
+        };
         let capture_control = NativeCaptureControl::new(capture_control);
 
         Ok(capture_control)

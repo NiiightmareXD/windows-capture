@@ -1,6 +1,6 @@
 """Fastest Windows Screen Capture Library For Python 🔥."""
 
-from .windows_capture import NativeWindowsCapture
+from .windows_capture import NativeWindowsCapture, NativeCaptureControl
 import ctypes
 import numpy
 import cv2
@@ -64,7 +64,7 @@ class Frame:
         )
 
 
-class CaptureControl:
+class InternalCaptureControl:
     """
     Class To Control The Capturing Session
 
@@ -76,13 +76,47 @@ class CaptureControl:
         Stops The Capture Thread
     """
 
-    def __init__(self, list: list) -> None:
-        """Constructs All The Necessary Attributes For The CaptureControl Object"""
-        self._list = list
+    def __init__(self, stop_list: list) -> None:
+        """Constructs All The Necessary Attributes For The InternalCaptureControl
+        Object"""
+        self._stop_list: list = stop_list
 
     def stop(self) -> None:
         """Stops The Capturing Thread"""
-        self._list[0] = True
+        self._stop_list[0] = True
+
+
+class CaptureControl:
+    """
+    Class To Control The Capturing Session
+
+    ...
+
+    Methods
+    -------
+    is_finished():
+        Checks To See If Capture Thread Is Finished
+    wait():
+        Waits Until The Capturing Thread Stops
+    stop():
+        Gracefully Stop The Capture Thread
+    """
+
+    def __init__(self, native_capture_control: NativeCaptureControl) -> None:
+        """Constructs All The Necessary Attributes For The CaptureControlObject"""
+        self.native_capture_control: NativeCaptureControl = native_capture_control
+
+    def is_finished(self) -> bool:
+        """Checks To See If Capture Thread Is Finished"""
+        return self.native_capture_control.is_finished()
+
+    def wait(self) -> None:
+        """Waits Until The Capturing Thread Stops"""
+        self.native_capture_control.wait()
+
+    def stop(self) -> None:
+        """Gracefully Stop The Capture Thread"""
+        self.native_capture_control.stop()
 
 
 class WindowsCapture:
@@ -104,6 +138,8 @@ class WindowsCapture:
     -------
     start():
         Starts The Capture Thread
+    start_free_threaded():
+        Starts The Capture Thread On A Dedicated Thread
     on_frame_arrived(
         buf : ctypes.POINTER,
         buf_len : int,
@@ -167,6 +203,19 @@ class WindowsCapture:
 
         self.capture.start()
 
+    def start_free_threaded(self) -> CaptureControl:
+        """Starts The Capture Thread On A Dedicated Thread"""
+        if self.frame_handler is None:
+            raise Exception("on_frame_arrived Event Handler Is Not Set")
+        elif self.closed_handler is None:
+            raise Exception("on_closed Event Handler Is Not Set")
+
+        native_capture_control = self.capture.start_free_threaded()
+
+        capture_control = CaptureControl(native_capture_control)
+
+        return capture_control
+
     def on_frame_arrived(
         self,
         buf: ctypes.POINTER,
@@ -178,7 +227,7 @@ class WindowsCapture:
         """This Method Is Called Before The on_frame_arrived Callback Function To
         Prepare Data"""
         if self.frame_handler:
-            internal_capture_control = CaptureControl(stop_list)
+            internal_capture_control = InternalCaptureControl(stop_list)
 
             row_pitch = buf_len / height
             if row_pitch == width * 4:
@@ -213,7 +262,7 @@ class WindowsCapture:
         else:
             raise Exception("on_closed Event Handler Is Not Set")
 
-    def event(self, handler: types.FunctionType) -> None:
+    def event(self, handler: types.FunctionType) -> types.FunctionType:
         """Overrides The Callback Function"""
         if handler.__name__ == "on_frame_arrived":
             self.frame_handler = handler
