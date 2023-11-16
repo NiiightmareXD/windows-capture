@@ -40,8 +40,8 @@ pub enum DirectXErrors {
 }
 
 /// Create ID3D11Device And ID3D11DeviceContext
-pub fn create_d3d_device(
-) -> Result<(ID3D11Device, ID3D11DeviceContext), Box<dyn Error + Send + Sync>> {
+pub fn create_d3d_device()
+-> Result<(ID3D11Device, ID3D11DeviceContext), Box<dyn Error + Send + Sync>> {
     // Set Feature Flags
     let feature_flags = [
         D3D_FEATURE_LEVEL_11_1,

@@ -51,7 +51,8 @@ impl NativeCaptureControl {
     }
 
     pub fn wait(&mut self, py: Python) -> PyResult<()> {
-        // But Honestly WTF Is This? You Know How Much Time It Took Me To Debug This? Just Why? Who Decided This BS Threading Shit?
+        // But Honestly WTF Is This? You Know How Much Time It Took Me To Debug This?
+        // Just Why? Who Decided This BS Threading Shit?
         py.allow_threads(|| {
             if let Some(capture_control) = self.capture_control.take() {
                 match capture_control.wait() {
@@ -71,7 +72,8 @@ impl NativeCaptureControl {
     }
 
     pub fn stop(&mut self, py: Python) -> PyResult<()> {
-        // But Honestly WTF Is This? You Know How Much Time It Took Me To Debug This? Just Why? Who Decided This BS Threading Shit?
+        // But Honestly WTF Is This? You Know How Much Time It Took Me To Debug This?
+        // Just Why? Who Decided This BS Threading Shit?
         py.allow_threads(|| {
             if let Some(capture_control) = self.capture_control.take() {
                 match capture_control.stop() {
@@ -268,7 +270,7 @@ impl NativeWindowsCapture {
             Err(e) => {
                 return Err(PyException::new_err(format!(
                     "Failed To Start Capture Session On A Dedicated Thread -> {e}"
-                )))
+                )));
             }
         };
         let capture_control = NativeCaptureControl::new(capture_control);
