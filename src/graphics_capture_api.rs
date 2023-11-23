@@ -278,7 +278,7 @@ impl GraphicsCaptureApi {
         }
 
         // Config
-        if self.capture_cursor.is_some() {
+        if self.capture_cursor.unwrap_or(false) {
             if ApiInformation::IsPropertyPresent(
                 &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
                 &HSTRING::from("IsCursorCaptureEnabled"),
@@ -292,7 +292,7 @@ impl GraphicsCaptureApi {
             }
         }
 
-        if self.draw_border.is_some() {
+        if self.draw_border.unwrap_or(false) {
             if ApiInformation::IsPropertyPresent(
                 &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
                 &HSTRING::from("IsBorderRequired"),
