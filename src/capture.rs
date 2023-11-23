@@ -321,7 +321,7 @@ pub trait WindowsCaptureHandler: Sized {
     /// Called Every Time A New Frame Is Available
     fn on_frame_arrived(
         &mut self,
-        frame: Frame,
+        frame: &mut Frame,
         capture_control: InternalCaptureControl,
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
 

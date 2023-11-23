@@ -298,14 +298,13 @@ impl WindowsCaptureHandler for InnerNativeWindowsCapture {
 
     fn on_frame_arrived(
         &mut self,
-        mut frame: Frame,
+        frame: &mut Frame,
         capture_control: InternalCaptureControl,
     ) -> Result<(), Box<(dyn Error + Send + Sync)>> {
         let width = frame.width();
         let height = frame.height();
-        let buf = frame.buffer()?;
-
-        let buf = buf.as_raw_buffer();
+        let buffer = frame.buffer()?;
+        let buffer = buffer.as_raw_buffer();
 
         Python::with_gil(|py| -> PyResult<()> {
             py.check_signals()?;
@@ -313,7 +312,13 @@ impl WindowsCaptureHandler for InnerNativeWindowsCapture {
             let stop_list = PyList::new(py, [false]);
             self.on_frame_arrived_callback.call1(
                 py,
-                (buf.as_ptr() as isize, buf.len(), width, height, stop_list),
+                (
+                    buffer.as_ptr() as isize,
+                    buffer.len(),
+                    width,
+                    height,
+                    stop_list,
+                ),
             )?;
 
             if stop_list[0].is_true()? {

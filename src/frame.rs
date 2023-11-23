@@ -1,7 +1,7 @@
-use std::{error::Error, path::Path, slice};
+use std::{error::Error, path::Path, ptr, slice};
 
-use image::{Rgba, RgbaImage};
-use ndarray::{s, ArrayBase, ArrayView, Dim, OwnedRepr};
+use image::{Rgb, RgbImage};
+use log::trace;
 use windows::Win32::Graphics::{
     Direct3D11::{
         ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_BOX, D3D11_CPU_ACCESS_READ,
@@ -24,6 +24,7 @@ pub struct Frame<'a> {
     d3d_device: &'a ID3D11Device,
     frame_surface: ID3D11Texture2D,
     context: &'a ID3D11DeviceContext,
+    buffer: &'a mut Vec<u8>,
     width: u32,
     height: u32,
     color_format: ColorFormat,
@@ -32,10 +33,11 @@ pub struct Frame<'a> {
 impl<'a> Frame<'a> {
     /// Craete A New Frame
     #[must_use]
-    pub const fn new(
+    pub fn new(
         d3d_device: &'a ID3D11Device,
         frame_surface: ID3D11Texture2D,
         context: &'a ID3D11DeviceContext,
+        buffer: &'a mut Vec<u8>,
         width: u32,
         height: u32,
         color_format: ColorFormat,
@@ -44,6 +46,7 @@ impl<'a> Frame<'a> {
             d3d_device,
             frame_surface,
             context,
+            buffer,
             width,
             height,
             color_format,
@@ -116,8 +119,11 @@ impl<'a> Frame<'a> {
         // Create Frame Buffer From Slice
         let frame_buffer = FrameBuffer::new(
             mapped_frame_data,
+            self.buffer,
             self.width,
             self.height,
+            mapped_resource.RowPitch,
+            mapped_resource.DepthPitch,
             self.color_format,
         );
 
@@ -210,51 +216,25 @@ impl<'a> Frame<'a> {
         // Create Frame Buffer From Slice
         let frame_buffer = FrameBuffer::new(
             mapped_frame_data,
+            self.buffer,
             texture_width,
             texture_height,
+            mapped_resource.RowPitch,
+            mapped_resource.DepthPitch,
             self.color_format,
         );
 
         Ok(frame_buffer)
     }
 
-    /// Save The Frame As An Image To The Specified Path
+    /// Save The Frame Buffer As An Image To The Specified Path
     pub fn save_as_image<T: AsRef<Path>>(
         &mut self,
         path: T,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let buffer = self.buffer()?;
+        let frame_buffer = self.buffer()?;
 
-        let nopadding_buffer = buffer.as_raw_nopadding_buffer()?;
-
-        let (height, width, _) = nopadding_buffer.dim();
-        let mut rgba_image: RgbaImage = RgbaImage::new(width as u32, height as u32);
-
-        if self.color_format == ColorFormat::Rgba8 {
-            for y in 0..height {
-                for x in 0..width {
-                    let r = nopadding_buffer[(y, x, 0)];
-                    let g = nopadding_buffer[(y, x, 1)];
-                    let b = nopadding_buffer[(y, x, 2)];
-                    let a = nopadding_buffer[(y, x, 3)];
-
-                    rgba_image.put_pixel(x as u32, y as u32, Rgba([r, g, b, a]));
-                }
-            }
-        } else {
-            for y in 0..height {
-                for x in 0..width {
-                    let b = nopadding_buffer[(y, x, 0)];
-                    let g = nopadding_buffer[(y, x, 1)];
-                    let r = nopadding_buffer[(y, x, 2)];
-                    let a = nopadding_buffer[(y, x, 3)];
-
-                    rgba_image.put_pixel(x as u32, y as u32, Rgba([r, g, b, a]));
-                }
-            }
-        }
-
-        rgba_image.save(path)?;
+        frame_buffer.save_as_image(path)?;
 
         Ok(())
     }
@@ -263,24 +243,33 @@ impl<'a> Frame<'a> {
 /// Frame Buffer Struct Used To Get Raw Pixel Data
 pub struct FrameBuffer<'a> {
     raw_buffer: &'a [u8],
+    buffer: &'a mut Vec<u8>,
     width: u32,
     height: u32,
+    row_pitch: u32,
+    depth_pitch: u32,
     color_format: ColorFormat,
 }
 
 impl<'a> FrameBuffer<'a> {
     /// Create A New Frame Buffer
     #[must_use]
-    pub const fn new(
+    pub fn new(
         raw_buffer: &'a [u8],
+        buffer: &'a mut Vec<u8>,
         width: u32,
         height: u32,
+        row_pitch: u32,
+        depth_pitch: u32,
         color_format: ColorFormat,
     ) -> Self {
         Self {
             raw_buffer,
+            buffer,
             width,
             height,
+            row_pitch,
+            depth_pitch,
             color_format,
         }
     }
@@ -297,12 +286,22 @@ impl<'a> FrameBuffer<'a> {
         self.height
     }
 
-    /// Get The Frame Buffer Height
+    /// Get The Frame Buffer Row Pitch
+    #[must_use]
+    pub const fn row_pitch(&self) -> u32 {
+        self.row_pitch
+    }
+
+    /// Get The Frame Buffer Depth Pitch
+    #[must_use]
+    pub const fn depth_pitch(&self) -> u32 {
+        self.depth_pitch
+    }
+
+    /// Check If The Buffer Has Padding
     #[must_use]
     pub const fn has_padding(&self) -> bool {
-        let raw_buffer = self.as_raw_buffer();
-
-        self.width as usize * 4 != raw_buffer.len() / self.height as usize
+        self.width * 4 != self.row_pitch
     }
 
     /// Get The Raw Pixel Data Might Have Padding
@@ -314,24 +313,26 @@ impl<'a> FrameBuffer<'a> {
     /// Get The Raw Pixel Data Without Padding
     #[allow(clippy::type_complexity)]
     pub fn as_raw_nopadding_buffer(
-        &self,
-    ) -> Result<ArrayBase<OwnedRepr<u8>, Dim<[usize; 3]>>, Box<dyn Error + Send + Sync>> {
-        let row_pitch = self.raw_buffer.len() / self.height as usize;
-
-        let array =
-            ArrayView::from_shape((self.height as usize, row_pitch), self.raw_buffer)?.to_owned();
-
-        if self.width as usize * 4 == self.raw_buffer.len() / self.height as usize {
-            let array = array.into_shape((self.height as usize, self.width as usize, 4))?;
-
-            Ok(array)
-        } else {
-            let array = array
-                .slice_move(s![.., ..self.width as usize * 4])
-                .into_shape((self.height as usize, self.width as usize, 4))?;
-
-            Ok(array)
+        &'a mut self,
+    ) -> Result<&'a mut Vec<u8>, Box<dyn Error + Send + Sync>> {
+        if self.buffer.capacity() < (self.width * self.height) as usize {
+            trace!("Resizing Preallocated Buffer");
+            self.buffer.resize((self.width * self.height) as usize, 0);
         }
+
+        for y in 0..self.height {
+            let index = (y * self.row_pitch) as usize;
+
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    self.raw_buffer.as_ptr().add(index),
+                    self.buffer.as_mut_ptr(),
+                    self.width as usize,
+                );
+            }
+        }
+
+        Ok(self.buffer)
     }
 
     /// Save The Frame Buffer As An Image To The Specified Path
@@ -339,36 +340,35 @@ impl<'a> FrameBuffer<'a> {
         &self,
         path: T,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let nopadding_buffer = self.as_raw_nopadding_buffer()?;
-
-        let (height, width, _) = nopadding_buffer.dim();
-        let mut rgba_image: RgbaImage = RgbaImage::new(width as u32, height as u32);
+        let mut rgb_image: RgbImage = RgbImage::new(self.width, self.height);
 
         if self.color_format == ColorFormat::Rgba8 {
-            for y in 0..height {
-                for x in 0..width {
-                    let r = nopadding_buffer[(y, x, 0)];
-                    let g = nopadding_buffer[(y, x, 1)];
-                    let b = nopadding_buffer[(y, x, 2)];
-                    let a = nopadding_buffer[(y, x, 3)];
+            for y in 0..self.height {
+                for x in 0..self.width {
+                    let first_index = (y * self.row_pitch + x * 4) as usize;
 
-                    rgba_image.put_pixel(x as u32, y as u32, Rgba([r, g, b, a]));
+                    let r = self.raw_buffer[first_index];
+                    let g = self.raw_buffer[first_index + 1];
+                    let b = self.raw_buffer[first_index + 2];
+
+                    rgb_image.put_pixel(x, y, Rgb([r, g, b]));
                 }
             }
         } else {
-            for y in 0..height {
-                for x in 0..width {
-                    let b = nopadding_buffer[(y, x, 0)];
-                    let g = nopadding_buffer[(y, x, 1)];
-                    let r = nopadding_buffer[(y, x, 2)];
-                    let a = nopadding_buffer[(y, x, 3)];
+            for y in 0..self.height {
+                for x in 0..self.width {
+                    let first_index = (y * self.row_pitch + x * 4) as usize;
 
-                    rgba_image.put_pixel(x as u32, y as u32, Rgba([r, g, b, a]));
+                    let b = self.raw_buffer[first_index];
+                    let g = self.raw_buffer[first_index + 1];
+                    let r = self.raw_buffer[first_index + 2];
+
+                    rgb_image.put_pixel(x, y, Rgb([r, g, b]));
                 }
             }
         }
 
-        rgba_image.save(path)?;
+        rgb_image.save(path)?;
 
         Ok(())
     }

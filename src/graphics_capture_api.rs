@@ -119,6 +119,10 @@ impl GraphicsCaptureApi {
         trace!("Creating Capture Session");
         let session = frame_pool.CreateCaptureSession(&item)?;
 
+        // Preallocate Memory
+        trace!("Preallocating Memory");
+        let mut buffer = vec![0u8; 3840 * 2160 * 4];
+
         // Trigger Struct
         let callback = Arc::new(Mutex::new(callback));
 
@@ -217,10 +221,11 @@ impl GraphicsCaptureApi {
                     let texture_height = desc.Height;
 
                     // Create A Frame
-                    let frame = Frame::new(
+                    let mut frame = Frame::new(
                         &d3d_device_frame_pool,
                         frame_surface,
                         &context,
+                        &mut buffer,
                         texture_width,
                         texture_height,
                         color_format,
@@ -233,7 +238,7 @@ impl GraphicsCaptureApi {
                     // Send The Frame To Trigger Struct
                     let result = callback_frame_pool
                         .lock()
-                        .on_frame_arrived(frame, internal_capture_control);
+                        .on_frame_arrived(&mut frame, internal_capture_control);
 
                     if stop.load(atomic::Ordering::Relaxed) || result.is_err() {
                         let _ = RESULT
