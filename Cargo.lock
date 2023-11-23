@@ -548,7 +548,7 @@ dependencies = [
 
 [[package]]
 name = "windows-capture"
-version = "1.0.32"
+version = "1.0.35"
 dependencies = [
  "image",
  "log",
@@ -560,7 +560,7 @@ dependencies = [
 
 [[package]]
 name = "windows-capture-python"
-version = "1.0.32"
+version = "1.0.35"
 dependencies = [
  "pyo3",
  "windows",
