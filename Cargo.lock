@@ -553,6 +553,7 @@ dependencies = [
  "image",
  "log",
  "parking_lot",
+ "rayon",
  "thiserror",
  "windows",
 ]

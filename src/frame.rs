@@ -2,6 +2,7 @@ use std::{error::Error, path::Path, ptr, slice};
 
 use image::{Rgb, RgbImage};
 use log::trace;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use windows::Win32::Graphics::{
     Direct3D11::{
         ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_BOX, D3D11_CPU_ACCESS_READ,
@@ -312,27 +313,29 @@ impl<'a> FrameBuffer<'a> {
 
     /// Get The Raw Pixel Data Without Padding
     #[allow(clippy::type_complexity)]
-    pub fn as_raw_nopadding_buffer(
-        &'a mut self,
-    ) -> Result<&'a mut Vec<u8>, Box<dyn Error + Send + Sync>> {
-        if self.buffer.capacity() < (self.width * self.height) as usize {
+    pub fn as_raw_nopadding_buffer(&'a mut self) -> Result<&'a [u8], Box<dyn Error + Send + Sync>> {
+        let frame_size = (self.width * self.height * 4) as usize;
+        if self.buffer.capacity() < frame_size {
             trace!("Resizing Preallocated Buffer");
-            self.buffer.resize((self.width * self.height) as usize, 0);
+            self.buffer.resize(frame_size, 0);
         }
 
-        for y in 0..self.height {
+        let width_size = (self.width * 4) as usize;
+        let buffer_address = self.buffer.as_mut_ptr() as isize;
+        (0..self.height).into_par_iter().for_each(|y| {
             let index = (y * self.row_pitch) as usize;
+            let ptr = buffer_address as *mut u8;
 
             unsafe {
                 ptr::copy_nonoverlapping(
                     self.raw_buffer.as_ptr().add(index),
-                    self.buffer.as_mut_ptr(),
-                    self.width as usize,
+                    ptr.add(y as usize * width_size),
+                    width_size,
                 );
             }
-        }
+        });
 
-        Ok(self.buffer)
+        Ok(&self.buffer[0..frame_size])
     }
 
     /// Save The Frame Buffer As An Image To The Specified Path
