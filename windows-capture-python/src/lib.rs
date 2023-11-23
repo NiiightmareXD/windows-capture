@@ -7,10 +7,18 @@
 #![warn(clippy::cargo)]
 #![allow(clippy::redundant_pub_crate)]
 
-use std::{error::Error, sync::Arc};
+use std::{
+    error::Error,
+    os::windows::io::AsRawHandle,
+    sync::{
+        atomic::{self, AtomicBool},
+        Arc,
+    },
+    thread::JoinHandle,
+};
 
 use ::windows_capture::{
-    capture::{CaptureControl, WindowsCaptureHandler},
+    capture::{CaptureControlError, WindowsCaptureHandler},
     frame::Frame,
     graphics_capture_api::InternalCaptureControl,
     monitor::Monitor,
@@ -18,6 +26,11 @@ use ::windows_capture::{
     window::Window,
 };
 use pyo3::{exceptions::PyException, prelude::*, types::PyList};
+use windows::Win32::{
+    Foundation::{HANDLE, LPARAM, WPARAM},
+    System::Threading::GetThreadId,
+    UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT},
+};
 
 /// Fastest Windows Screen Capture Library For Python 🔥.
 #[pymodule]
@@ -30,11 +43,11 @@ fn windows_capture(_py: Python, m: &PyModule) -> PyResult<()> {
 /// Internal Struct Used To Handle Free Threaded Start
 #[pyclass]
 pub struct NativeCaptureControl {
-    capture_control: Option<CaptureControl>,
+    capture_control: Option<NoGenericCaptureControl>,
 }
 
 impl NativeCaptureControl {
-    const fn new(capture_control: CaptureControl) -> Self {
+    const fn new(capture_control: NoGenericCaptureControl) -> Self {
         Self {
             capture_control: Some(capture_control),
         }
@@ -93,13 +106,94 @@ impl NativeCaptureControl {
     }
 }
 
+/// Because The Default Rust Capture Control Contains Generic That Is
+/// Unsupported By Python
+pub struct NoGenericCaptureControl {
+    thread_handle: Option<JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>>,
+    halt_handle: Arc<AtomicBool>,
+}
+
+impl NoGenericCaptureControl {
+    #[must_use]
+    pub fn new(
+        thread_handle: JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>,
+        halt_handle: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            thread_handle: Some(thread_handle),
+            halt_handle,
+        }
+    }
+
+    #[must_use]
+    pub fn is_finished(&self) -> bool {
+        self.thread_handle
+            .as_ref()
+            .map_or(true, |thread_handle| thread_handle.is_finished())
+    }
+
+    pub fn wait(mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        if let Some(thread_handle) = self.thread_handle.take() {
+            match thread_handle.join() {
+                Ok(result) => result?,
+                Err(_) => {
+                    return Err(Box::new(CaptureControlError::FailedToJoinThread));
+                }
+            }
+        } else {
+            return Err(Box::new(CaptureControlError::ThreadHandleIsTaken));
+        }
+
+        Ok(())
+    }
+
+    /// Gracefully Stop The Capture Thread
+    pub fn stop(mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        self.halt_handle.store(true, atomic::Ordering::Relaxed);
+
+        if let Some(thread_handle) = self.thread_handle.take() {
+            let handle = thread_handle.as_raw_handle();
+            let handle = HANDLE(handle as isize);
+            let therad_id = unsafe { GetThreadId(handle) };
+
+            loop {
+                match unsafe {
+                    PostThreadMessageW(therad_id, WM_QUIT, WPARAM::default(), LPARAM::default())
+                } {
+                    Ok(_) => break,
+                    Err(e) => {
+                        if thread_handle.is_finished() {
+                            break;
+                        }
+
+                        if e.code().0 != -2147023452 {
+                            Err(e)?;
+                        }
+                    }
+                }
+            }
+
+            match thread_handle.join() {
+                Ok(result) => result?,
+                Err(_) => {
+                    return Err(Box::new(CaptureControlError::FailedToJoinThread));
+                }
+            }
+        } else {
+            return Err(Box::new(CaptureControlError::ThreadHandleIsTaken));
+        }
+
+        Ok(())
+    }
+}
+
 /// Internal Struct Used For Windows Capture
 #[pyclass]
 pub struct NativeWindowsCapture {
     on_frame_arrived_callback: Arc<PyObject>,
     on_closed: Arc<PyObject>,
-    capture_cursor: bool,
-    draw_border: bool,
+    capture_cursor: Option<bool>,
+    draw_border: Option<bool>,
     monitor_index: Option<usize>,
     window_name: Option<String>,
 }
@@ -110,9 +204,9 @@ impl NativeWindowsCapture {
     pub fn new(
         on_frame_arrived_callback: PyObject,
         on_closed: PyObject,
-        capture_cursor: bool,
-        draw_border: bool,
-        monitor_index: Option<usize>,
+        capture_cursor: Option<bool>,
+        draw_border: Option<bool>,
+        mut monitor_index: Option<usize>,
         window_name: Option<String>,
     ) -> PyResult<Self> {
         if window_name.is_some() && monitor_index.is_some() {
@@ -122,9 +216,7 @@ impl NativeWindowsCapture {
         }
 
         if window_name.is_none() && monitor_index.is_none() {
-            return Err(PyException::new_err(
-                "You Should Specify Either The Monitor Index Or The Window Name",
-            ));
+            monitor_index = Some(0);
         }
 
         Ok(Self {
@@ -151,8 +243,8 @@ impl NativeWindowsCapture {
 
             match WindowsCaptureSettings::new(
                 window,
-                Some(self.capture_cursor),
-                Some(self.draw_border),
+                self.capture_cursor,
+                self.draw_border,
                 ColorFormat::Bgra8,
                 (
                     self.on_frame_arrived_callback.clone(),
@@ -178,8 +270,8 @@ impl NativeWindowsCapture {
 
             match WindowsCaptureSettings::new(
                 monitor,
-                Some(self.capture_cursor),
-                Some(self.draw_border),
+                self.capture_cursor,
+                self.draw_border,
                 ColorFormat::Bgra8,
                 (
                     self.on_frame_arrived_callback.clone(),
@@ -221,8 +313,8 @@ impl NativeWindowsCapture {
 
             match WindowsCaptureSettings::new(
                 window,
-                Some(self.capture_cursor),
-                Some(self.draw_border),
+                self.capture_cursor,
+                self.draw_border,
                 ColorFormat::Bgra8,
                 (
                     self.on_frame_arrived_callback.clone(),
@@ -248,8 +340,8 @@ impl NativeWindowsCapture {
 
             match WindowsCaptureSettings::new(
                 monitor,
-                Some(self.capture_cursor),
-                Some(self.draw_border),
+                self.capture_cursor,
+                self.draw_border,
                 ColorFormat::Bgra8,
                 (
                     self.on_frame_arrived_callback.clone(),
@@ -273,7 +365,11 @@ impl NativeWindowsCapture {
                 )));
             }
         };
-        let capture_control = NativeCaptureControl::new(capture_control);
+
+        let halt_handle = capture_control.halt_handle();
+        let thread_handle = capture_control.into_thread_handle();
+        let no_generic_capture_control = NoGenericCaptureControl::new(thread_handle, halt_handle);
+        let capture_control = NativeCaptureControl::new(no_generic_capture_control);
 
         Ok(capture_control)
     }

@@ -75,7 +75,7 @@ pub struct GraphicsCaptureApi {
     _d3d_device_context: ID3D11DeviceContext,
     frame_pool: Option<Arc<Direct3D11CaptureFramePool>>,
     session: Option<GraphicsCaptureSession>,
-    closed: Arc<AtomicBool>,
+    halt: Arc<AtomicBool>,
     active: bool,
     capture_cursor: Option<bool>,
     draw_border: Option<bool>,
@@ -85,7 +85,7 @@ impl GraphicsCaptureApi {
     /// Create A New Graphics Capture Api Struct
     pub fn new<T: WindowsCaptureHandler + Send + 'static>(
         item: GraphicsCaptureItem,
-        callback: T,
+        callback: Arc<Mutex<T>>,
         capture_cursor: Option<bool>,
         draw_border: Option<bool>,
         color_format: ColorFormat,
@@ -123,21 +123,18 @@ impl GraphicsCaptureApi {
         trace!("Preallocating Memory");
         let mut buffer = vec![0u8; 3840 * 2160 * 4];
 
-        // Trigger Struct
-        let callback = Arc::new(Mutex::new(callback));
-
         // Indicates If The Capture Is Closed
-        let closed = Arc::new(AtomicBool::new(false));
+        let halt = Arc::new(AtomicBool::new(false));
 
         // Set Capture Session Closed Event
         item.Closed(
             &TypedEventHandler::<GraphicsCaptureItem, IInspectable>::new({
                 // Init
                 let callback_closed = callback.clone();
-                let closed_item = closed.clone();
+                let halt_closed = halt.clone();
 
                 move |_, _| {
-                    closed_item.store(true, atomic::Ordering::Relaxed);
+                    halt_closed.store(true, atomic::Ordering::Relaxed);
 
                     // To Stop Messge Loop
                     unsafe { PostQuitMessage(0) };
@@ -159,7 +156,7 @@ impl GraphicsCaptureApi {
             &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new({
                 // Init
                 let frame_pool_recreate = frame_pool.clone();
-                let closed_frame_pool = closed.clone();
+                let halt_frame_pool = halt.clone();
                 let d3d_device_frame_pool = d3d_device.clone();
                 let context = d3d_device_context.clone();
 
@@ -169,7 +166,7 @@ impl GraphicsCaptureApi {
 
                 move |frame, _| {
                     // Return Early If The Capture Is Closed
-                    if closed_frame_pool.load(atomic::Ordering::Relaxed) {
+                    if halt_frame_pool.load(atomic::Ordering::Relaxed) {
                         return Ok(());
                     }
 
@@ -245,7 +242,7 @@ impl GraphicsCaptureApi {
                             .replace(Some(result))
                             .expect("Failed To Replace RESULT");
 
-                        closed_frame_pool.store(true, atomic::Ordering::Relaxed);
+                        halt_frame_pool.store(true, atomic::Ordering::Relaxed);
 
                         // To Stop Messge Loop
                         unsafe { PostQuitMessage(0) };
@@ -263,7 +260,7 @@ impl GraphicsCaptureApi {
             _d3d_device_context: d3d_device_context,
             frame_pool: Some(frame_pool),
             session: Some(session),
-            closed,
+            halt,
             active: false,
             capture_cursor,
             draw_border,
@@ -328,7 +325,7 @@ impl GraphicsCaptureApi {
     /// Get Halt Handle
     #[must_use]
     pub fn halt_handle(&self) -> Arc<AtomicBool> {
-        self.closed.clone()
+        self.halt.clone()
     }
 
     /// Check If Windows Graphics Capture Api Is Supported

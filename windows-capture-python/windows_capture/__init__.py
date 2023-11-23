@@ -159,9 +159,9 @@ class WindowsCapture:
 
     def __init__(
         self,
-        capture_cursor: bool = True,
-        draw_border: bool = False,
-        monitor_index: int = 0,
+        capture_cursor: Optional[bool] = True,
+        draw_border: Optional[bool] = None,
+        monitor_index: Optional[int] = None,
         window_name: Optional[str] = None,
     ) -> None:
         """

@@ -10,6 +10,7 @@ use std::{
 };
 
 use log::{debug, info, trace, warn};
+use parking_lot::Mutex;
 use windows::{
     Foundation::AsyncActionCompletedHandler,
     Win32::{
@@ -39,24 +40,29 @@ use crate::{
 pub enum CaptureControlError {
     #[error("Failed To Join Thread")]
     FailedToJoinThread,
+    #[error("Thread Handle Is Taken Out Of Struct")]
+    ThreadHandleIsTaken,
 }
 
 /// Struct Used To Control Capture Thread
-pub struct CaptureControl {
+pub struct CaptureControl<T: WindowsCaptureHandler + Send + 'static> {
     thread_handle: Option<JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>>,
     halt_handle: Arc<AtomicBool>,
+    callback: Arc<Mutex<T>>,
 }
 
-impl CaptureControl {
+impl<T: WindowsCaptureHandler + Send + 'static> CaptureControl<T> {
     /// Create A New Capture Control Struct
     #[must_use]
     pub fn new(
         thread_handle: JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>,
         halt_handle: Arc<AtomicBool>,
+        callback: Arc<Mutex<T>>,
     ) -> Self {
         Self {
             thread_handle: Some(thread_handle),
             halt_handle,
+            callback,
         }
     }
 
@@ -68,6 +74,24 @@ impl CaptureControl {
             .map_or(true, |thread_handle| thread_handle.is_finished())
     }
 
+    /// Get The Halt Handle Used To Pause The Capture Thread
+    #[must_use]
+    pub fn into_thread_handle(self) -> JoinHandle<Result<(), Box<dyn Error + Send + Sync>>> {
+        self.thread_handle.unwrap()
+    }
+
+    /// Get The Halt Handle Used To Pause The Capture Thread
+    #[must_use]
+    pub fn halt_handle(&self) -> Arc<AtomicBool> {
+        self.halt_handle.clone()
+    }
+
+    /// Get The Callback Struct Used To Call Struct Methods Directly
+    #[must_use]
+    pub fn callback(&self) -> Arc<Mutex<T>> {
+        self.callback.clone()
+    }
+
     /// Wait Until The Capturing Thread Stops
     pub fn wait(mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         if let Some(thread_handle) = self.thread_handle.take() {
@@ -77,6 +101,8 @@ impl CaptureControl {
                     return Err(Box::new(CaptureControlError::FailedToJoinThread));
                 }
             }
+        } else {
+            return Err(Box::new(CaptureControlError::ThreadHandleIsTaken));
         }
 
         Ok(())
@@ -116,6 +142,8 @@ impl CaptureControl {
                     return Err(Box::new(CaptureControlError::FailedToJoinThread));
                 }
             }
+        } else {
+            return Err(Box::new(CaptureControlError::ThreadHandleIsTaken));
         }
 
         Ok(())
@@ -150,10 +178,10 @@ pub trait WindowsCaptureHandler: Sized {
 
         // Start Capture
         info!("Starting Capture Thread");
-        let trigger = Self::new(settings.flags)?;
+        let callback = Arc::new(Mutex::new(Self::new(settings.flags)?));
         let mut capture = GraphicsCaptureApi::new(
             settings.item,
-            trigger,
+            callback,
             settings.capture_cursor,
             settings.draw_border,
             settings.color_format,
@@ -213,12 +241,13 @@ pub trait WindowsCaptureHandler: Sized {
     /// Starts The Capture Without Taking Control Of The Current Thread
     fn start_free_threaded(
         settings: WindowsCaptureSettings<Self::Flags>,
-    ) -> Result<CaptureControl, Box<dyn Error + Send + Sync>>
+    ) -> Result<CaptureControl<Self>, Box<dyn Error + Send + Sync>>
     where
         Self: Send + 'static,
         <Self as WindowsCaptureHandler>::Flags: Send,
     {
-        let (sender, receiver) = mpsc::channel::<Arc<AtomicBool>>();
+        let (halt_sender, halt_receiver) = mpsc::channel::<Arc<AtomicBool>>();
+        let (callback_sender, callback_receiver) = mpsc::channel::<Arc<Mutex<Self>>>();
 
         let thread_handle = thread::spawn(move || -> Result<(), Box<dyn Error + Send + Sync>> {
             // Initialize WinRT
@@ -236,10 +265,10 @@ pub trait WindowsCaptureHandler: Sized {
 
             // Start Capture
             info!("Starting Capture Thread");
-            let trigger = Self::new(settings.flags)?;
+            let callback = Arc::new(Mutex::new(Self::new(settings.flags)?));
             let mut capture = GraphicsCaptureApi::new(
                 settings.item,
-                trigger,
+                callback.clone(),
                 settings.capture_cursor,
                 settings.draw_border,
                 settings.color_format,
@@ -249,7 +278,11 @@ pub trait WindowsCaptureHandler: Sized {
             // Send Halt Handle
             trace!("Sending Halt Handle");
             let halt_handle = capture.halt_handle();
-            sender.send(halt_handle)?;
+            halt_sender.send(halt_handle)?;
+
+            // Send Callback
+            trace!("Sending Callback");
+            callback_sender.send(callback)?;
 
             // Debug Thread ID
             debug!("Thread ID: {}", unsafe { GetCurrentThreadId() });
@@ -301,7 +334,7 @@ pub trait WindowsCaptureHandler: Sized {
             Ok(())
         });
 
-        let halt_handle = match receiver.recv() {
+        let halt_handle = match halt_receiver.recv() {
             Ok(halt_handle) => halt_handle,
             Err(_) => match thread_handle.join() {
                 Ok(result) => return Err(result.err().unwrap()),
@@ -311,7 +344,17 @@ pub trait WindowsCaptureHandler: Sized {
             },
         };
 
-        Ok(CaptureControl::new(thread_handle, halt_handle))
+        let callback = match callback_receiver.recv() {
+            Ok(callback_handle) => callback_handle,
+            Err(_) => match thread_handle.join() {
+                Ok(result) => return Err(result.err().unwrap()),
+                Err(_) => {
+                    return Err(Box::new(CaptureControlError::FailedToJoinThread));
+                }
+            },
+        };
+
+        Ok(CaptureControl::new(thread_handle, halt_handle, callback))
     }
 
     /// Function That Will Be Called To Create The Struct The Flags Can Be
