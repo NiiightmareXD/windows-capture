@@ -314,6 +314,10 @@ impl<'a> FrameBuffer<'a> {
     /// Get The Raw Pixel Data Without Padding
     #[allow(clippy::type_complexity)]
     pub fn as_raw_nopadding_buffer(&'a mut self) -> Result<&'a [u8], Box<dyn Error + Send + Sync>> {
+        if !self.has_padding() {
+            return Ok(self.raw_buffer);
+        }
+
         let frame_size = (self.width * self.height * 4) as usize;
         if self.buffer.capacity() < frame_size {
             trace!("Resizing Preallocated Buffer");
