@@ -42,9 +42,9 @@ pub enum WindowsCaptureError {
     #[error("Graphics Capture API Is Not Supported")]
     Unsupported,
     #[error("Graphics Capture API Toggling Cursor Capture Is Not Supported")]
-    CursorUnsupported,
+    CursorConfigUnsupported,
     #[error("Graphics Capture API Toggling Border Capture Is Not Supported")]
-    BorderUnsupported,
+    BorderConfigUnsupported,
     #[error("Already Started")]
     AlreadyStarted,
 }
@@ -285,7 +285,7 @@ impl GraphicsCaptureApi {
                     .unwrap()
                     .SetIsCursorCaptureEnabled(self.capture_cursor.unwrap())?;
             } else {
-                return Err(Box::new(WindowsCaptureError::CursorUnsupported));
+                return Err(Box::new(WindowsCaptureError::CursorConfigUnsupported));
             }
         }
 
@@ -299,7 +299,7 @@ impl GraphicsCaptureApi {
                     .unwrap()
                     .SetIsBorderRequired(self.draw_border.unwrap())?;
             } else {
-                return Err(Box::new(WindowsCaptureError::BorderUnsupported));
+                return Err(Box::new(WindowsCaptureError::BorderConfigUnsupported));
             }
         }
 

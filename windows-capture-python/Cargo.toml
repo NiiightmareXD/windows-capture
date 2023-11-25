@@ -1,6 +1,6 @@
 [package]
 name = "windows-capture-python"
-version = "1.0.35"
+version = "1.0.36"
 authors = ["NiiightmareXD"]
 edition = "2021"
 description = "Fastest Windows Screen Capture Library For Python 🔥"

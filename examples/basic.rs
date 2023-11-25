@@ -57,8 +57,8 @@ fn main() {
         foreground_window,
         // Capture Cursor
         Some(true),
-        // Draw Borders
-        Some(false),
+        // Draw Borders (None Means Default Api Configuration)
+        None,
         // Kind Of Pixel Format For Frame To Have
         ColorFormat::Rgba8,
         // Will Be Passed To The New Function
