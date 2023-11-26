@@ -1,12 +1,13 @@
 use std::{error::Error, mem, ptr};
 
 use windows::{
+    core::PCWSTR,
     Graphics::Capture::GraphicsCaptureItem,
     Win32::{
         Foundation::{BOOL, LPARAM, POINT, RECT, TRUE},
         Graphics::Gdi::{
-            EnumDisplayMonitors, GetMonitorInfoW, MonitorFromPoint, HDC, HMONITOR, MONITORINFO,
-            MONITORINFOEXW, MONITOR_DEFAULTTOPRIMARY,
+            EnumDisplayDevicesW, EnumDisplayMonitors, GetMonitorInfoW, MonitorFromPoint,
+            DISPLAY_DEVICEW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW, MONITOR_DEFAULTTOPRIMARY,
         },
         System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop,
     },
@@ -17,6 +18,10 @@ use windows::{
 pub enum MonitorErrors {
     #[error("Failed To Find Monitor")]
     NotFound,
+    #[error("Failed To Get Monitor Info")]
+    FailedToGetMonitorInfo,
+    #[error("Failed To Get Monitor Name")]
+    FailedToGetMonitorName,
 }
 
 /// Represents A Monitor Device
@@ -38,7 +43,7 @@ impl Monitor {
         Ok(Self { monitor })
     }
 
-    /// Get The Monitor From It's Index
+    /// Get The Monitor From Enumerate Index
     pub fn from_index(index: usize) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let monitor = Self::enumerate()?;
         let monitor = match monitor.get(index) {
@@ -49,7 +54,7 @@ impl Monitor {
         Ok(monitor)
     }
 
-    /// Get Monitor Device Name
+    /// Get Monitor Name
     pub fn name(&self) -> Result<String, Box<dyn Error + Send + Sync>> {
         let mut monitor_info = MONITORINFOEXW {
             monitorInfo: MONITORINFO {
@@ -60,14 +65,17 @@ impl Monitor {
             },
             szDevice: [0; 32],
         };
-        unsafe {
-            GetMonitorInfoW(
+        if unsafe {
+            !GetMonitorInfoW(
                 self.as_raw_hmonitor(),
                 std::ptr::addr_of_mut!(monitor_info).cast(),
             )
-        };
+            .as_bool()
+        } {
+            return Err(Box::new(MonitorErrors::FailedToGetMonitorInfo));
+        }
 
-        Ok(String::from_utf16(
+        let device_name = String::from_utf16(
             &monitor_info
                 .szDevice
                 .as_slice()
@@ -75,7 +83,39 @@ impl Monitor {
                 .take_while(|ch| **ch != 0x0000)
                 .copied()
                 .collect::<Vec<_>>(),
-        )?)
+        )?;
+
+        let mut display_device = DISPLAY_DEVICEW {
+            cb: mem::size_of::<DISPLAY_DEVICEW>() as u32,
+            DeviceName: [0; 32],
+            DeviceString: [0; 128],
+            StateFlags: 0,
+            DeviceID: [0; 128],
+            DeviceKey: [0; 128],
+        };
+
+        if unsafe {
+            !EnumDisplayDevicesW(
+                PCWSTR::from_raw(monitor_info.szDevice.as_mut_ptr()),
+                0,
+                &mut display_device,
+                0,
+            )
+            .as_bool()
+        } {
+            return Err(Box::new(MonitorErrors::FailedToGetMonitorName));
+        }
+        let device_string = String::from_utf16(
+            &display_device
+                .DeviceString
+                .as_slice()
+                .iter()
+                .take_while(|ch| **ch != 0x0000)
+                .copied()
+                .collect::<Vec<_>>(),
+        )?;
+
+        Ok(format!("{device_string} ({device_name})"))
     }
 
     /// Get A List Of All Monitors
