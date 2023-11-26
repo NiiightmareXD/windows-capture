@@ -73,9 +73,9 @@ impl Window {
 
     /// Get Window Title
     pub fn title(&self) -> Result<String, Box<dyn Error + Send + Sync>> {
-        let len = unsafe { GetWindowTextLengthW(self.window) } + 1;
+        let len = unsafe { GetWindowTextLengthW(self.window) };
 
-        let mut name = vec![0u16; len as usize];
+        let mut name = vec![0u16; len as usize + 1];
         if len > 1 {
             let copied = unsafe { GetWindowTextW(self.window, &mut name) };
             if copied == 0 {
@@ -83,7 +83,16 @@ impl Window {
             }
         }
 
-        Ok(String::from_utf16_lossy(&name))
+        let name = String::from_utf16(
+            &name
+                .as_slice()
+                .iter()
+                .take_while(|ch| **ch != 0x0000)
+                .copied()
+                .collect::<Vec<_>>(),
+        )?;
+
+        Ok(name)
     }
 
     /// Check If The Window Is A Valid Window
