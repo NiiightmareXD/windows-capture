@@ -1,11 +1,12 @@
-use std::{error::Error, ptr};
+use std::{error::Error, mem, ptr};
 
 use windows::{
     Graphics::Capture::GraphicsCaptureItem,
     Win32::{
         Foundation::{BOOL, LPARAM, POINT, RECT, TRUE},
         Graphics::Gdi::{
-            EnumDisplayMonitors, MonitorFromPoint, HDC, HMONITOR, MONITOR_DEFAULTTOPRIMARY,
+            EnumDisplayMonitors, GetMonitorInfoW, MonitorFromPoint, HDC, HMONITOR, MONITORINFO,
+            MONITORINFOEXW, MONITOR_DEFAULTTOPRIMARY,
         },
         System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop,
     },
@@ -45,12 +46,41 @@ impl Monitor {
             None => return Err(Box::new(MonitorErrors::NotFound)),
         };
 
-        Ok(Self { monitor })
+        Ok(monitor)
+    }
+
+    /// Get Monitor Device Name
+    pub fn name(&self) -> Result<String, Box<dyn Error + Send + Sync>> {
+        let mut monitor_info = MONITORINFOEXW {
+            monitorInfo: MONITORINFO {
+                cbSize: mem::size_of::<MONITORINFOEXW>() as u32,
+                rcMonitor: RECT::default(),
+                rcWork: RECT::default(),
+                dwFlags: 0,
+            },
+            szDevice: [0; 32],
+        };
+        unsafe {
+            GetMonitorInfoW(
+                self.as_raw_hmonitor(),
+                std::ptr::addr_of_mut!(monitor_info).cast(),
+            )
+        };
+
+        Ok(String::from_utf16(
+            &monitor_info
+                .szDevice
+                .as_slice()
+                .iter()
+                .take_while(|ch| **ch != 0x0000)
+                .copied()
+                .collect::<Vec<_>>(),
+        )?)
     }
 
     /// Get A List Of All Monitors
-    pub fn enumerate() -> Result<Vec<HMONITOR>, Box<dyn Error + Send + Sync>> {
-        let mut monitors: Vec<HMONITOR> = Vec::new();
+    pub fn enumerate() -> Result<Vec<Self>, Box<dyn Error + Send + Sync>> {
+        let mut monitors: Vec<Self> = Vec::new();
 
         unsafe {
             EnumDisplayMonitors(
@@ -84,9 +114,9 @@ impl Monitor {
         _: *mut RECT,
         vec: LPARAM,
     ) -> BOOL {
-        let monitors = &mut *(vec.0 as *mut Vec<HMONITOR>);
+        let monitors = &mut *(vec.0 as *mut Vec<Self>);
 
-        monitors.push(monitor);
+        monitors.push(Self { monitor });
 
         TRUE
     }
