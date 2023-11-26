@@ -38,6 +38,7 @@ windows = { version = "0.52.0", features = [
     "System",
     "Graphics_DirectX_Direct3D11",
     "Foundation_Metadata",
+    "Win32_Devices_Display",
 ] }
 
 [package.metadata.docs.rs]
