@@ -6,7 +6,8 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use windows::Win32::Graphics::{
     Direct3D11::{
         ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_BOX, D3D11_CPU_ACCESS_READ,
-        D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
+        D3D11_CPU_ACCESS_WRITE, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ_WRITE,
+        D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
     },
     Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC},
 };
@@ -85,7 +86,7 @@ impl<'a> Frame<'a> {
             },
             Usage: D3D11_USAGE_STAGING,
             BindFlags: 0,
-            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32 | D3D11_CPU_ACCESS_WRITE.0 as u32,
             MiscFlags: 0,
         };
 
@@ -105,14 +106,19 @@ impl<'a> Frame<'a> {
         // Map The Texture To Enable CPU Access
         let mut mapped_resource = D3D11_MAPPED_SUBRESOURCE::default();
         unsafe {
-            self.context
-                .Map(&texture, 0, D3D11_MAP_READ, 0, Some(&mut mapped_resource))?;
+            self.context.Map(
+                &texture,
+                0,
+                D3D11_MAP_READ_WRITE,
+                0,
+                Some(&mut mapped_resource),
+            )?;
         };
 
         // Get The Mapped Resource Data Slice
         let mapped_frame_data = unsafe {
-            slice::from_raw_parts(
-                mapped_resource.pData as *const u8,
+            slice::from_raw_parts_mut(
+                mapped_resource.pData.cast(),
                 (self.height * mapped_resource.RowPitch) as usize,
             )
         };
@@ -163,7 +169,7 @@ impl<'a> Frame<'a> {
             },
             Usage: D3D11_USAGE_STAGING,
             BindFlags: 0,
-            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32 | D3D11_CPU_ACCESS_WRITE.0 as u32,
             MiscFlags: 0,
         };
 
@@ -202,14 +208,19 @@ impl<'a> Frame<'a> {
         // Map The Texture To Enable CPU Access
         let mut mapped_resource = D3D11_MAPPED_SUBRESOURCE::default();
         unsafe {
-            self.context
-                .Map(&texture, 0, D3D11_MAP_READ, 0, Some(&mut mapped_resource))?;
+            self.context.Map(
+                &texture,
+                0,
+                D3D11_MAP_READ_WRITE,
+                0,
+                Some(&mut mapped_resource),
+            )?;
         };
 
         // Get The Mapped Resource Data Slice
         let mapped_frame_data = unsafe {
-            slice::from_raw_parts(
-                mapped_resource.pData as *const u8,
+            slice::from_raw_parts_mut(
+                mapped_resource.pData.cast(),
                 (texture_height * mapped_resource.RowPitch) as usize,
             )
         };
@@ -243,7 +254,7 @@ impl<'a> Frame<'a> {
 
 /// Frame Buffer Struct Used To Get Raw Pixel Data
 pub struct FrameBuffer<'a> {
-    raw_buffer: &'a [u8],
+    raw_buffer: &'a mut [u8],
     buffer: &'a mut Vec<u8>,
     width: u32,
     height: u32,
@@ -256,7 +267,7 @@ impl<'a> FrameBuffer<'a> {
     /// Create A New Frame Buffer
     #[must_use]
     pub fn new(
-        raw_buffer: &'a [u8],
+        raw_buffer: &'a mut [u8],
         buffer: &'a mut Vec<u8>,
         width: u32,
         height: u32,
@@ -307,13 +318,15 @@ impl<'a> FrameBuffer<'a> {
 
     /// Get The Raw Pixel Data Might Have Padding
     #[must_use]
-    pub const fn as_raw_buffer(&self) -> &'a [u8] {
+    pub fn as_raw_buffer(&'a mut self) -> &'a mut [u8] {
         self.raw_buffer
     }
 
     /// Get The Raw Pixel Data Without Padding
     #[allow(clippy::type_complexity)]
-    pub fn as_raw_nopadding_buffer(&'a mut self) -> Result<&'a [u8], Box<dyn Error + Send + Sync>> {
+    pub fn as_raw_nopadding_buffer(
+        &'a mut self,
+    ) -> Result<&'a mut [u8], Box<dyn Error + Send + Sync>> {
         if !self.has_padding() {
             return Ok(self.raw_buffer);
         }
@@ -339,7 +352,7 @@ impl<'a> FrameBuffer<'a> {
             }
         });
 
-        Ok(&self.buffer[0..frame_size])
+        Ok(&mut self.buffer[0..frame_size])
     }
 
     /// Save The Frame Buffer As An Image To The Specified Path

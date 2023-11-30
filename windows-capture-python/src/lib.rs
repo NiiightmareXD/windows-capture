@@ -216,7 +216,7 @@ impl NativeWindowsCapture {
         }
 
         if window_name.is_none() && monitor_index.is_none() {
-            monitor_index = Some(0);
+            monitor_index = Some(1);
         }
 
         Ok(Self {
@@ -399,7 +399,7 @@ impl WindowsCaptureHandler for InnerNativeWindowsCapture {
     ) -> Result<(), Box<(dyn Error + Send + Sync)>> {
         let width = frame.width();
         let height = frame.height();
-        let buffer = frame.buffer()?;
+        let mut buffer = frame.buffer()?;
         let buffer = buffer.as_raw_buffer();
 
         Python::with_gil(|py| -> PyResult<()> {
