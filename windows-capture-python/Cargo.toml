@@ -1,6 +1,6 @@
 [package]
 name = "windows-capture-python"
-version = "1.0.44"
+version = "1.0.45"
 authors = ["NiiightmareXD"]
 edition = "2021"
 description = "Fastest Windows Screen Capture Library For Python 🔥"
@@ -29,4 +29,4 @@ windows = { version = "0.52.0", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_Foundation",
 ] }
-windows-capture = { path = "../" }
+windows-capture = { path = ".." }
