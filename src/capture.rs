@@ -176,6 +176,10 @@ pub trait WindowsCaptureHandler: Sized {
         };
         let controller = unsafe { CreateDispatcherQueueController(options)? };
 
+        // Debug Thread ID
+        let thread_id = unsafe { GetCurrentThreadId() };
+        debug!("Thread ID: {thread_id}");
+
         // Start Capture
         info!("Starting Capture Thread");
         let callback = Arc::new(Mutex::new(Self::new(settings.flags)?));
@@ -185,11 +189,9 @@ pub trait WindowsCaptureHandler: Sized {
             settings.capture_cursor,
             settings.draw_border,
             settings.color_format,
+            thread_id,
         )?;
         capture.start_capture()?;
-
-        // Debug Thread ID
-        debug!("Thread ID: {}", unsafe { GetCurrentThreadId() });
 
         // Message Loop
         trace!("Entering Message Loop");
@@ -263,6 +265,10 @@ pub trait WindowsCaptureHandler: Sized {
             };
             let controller = unsafe { CreateDispatcherQueueController(options)? };
 
+            // Debug Thread ID
+            let thread_id = unsafe { GetCurrentThreadId() };
+            debug!("Thread ID: {thread_id}");
+
             // Start Capture
             info!("Starting Capture Thread");
             let callback = Arc::new(Mutex::new(Self::new(settings.flags)?));
@@ -272,6 +278,7 @@ pub trait WindowsCaptureHandler: Sized {
                 settings.capture_cursor,
                 settings.draw_border,
                 settings.color_format,
+                thread_id,
             )?;
             capture.start_capture()?;
 
@@ -283,9 +290,6 @@ pub trait WindowsCaptureHandler: Sized {
             // Send Callback
             trace!("Sending Callback");
             callback_sender.send(callback)?;
-
-            // Debug Thread ID
-            debug!("Thread ID: {}", unsafe { GetCurrentThreadId() });
 
             // Message Loop
             trace!("Entering Message Loop");

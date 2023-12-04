@@ -76,7 +76,7 @@ impl Window {
         let len = unsafe { GetWindowTextLengthW(self.window) };
 
         let mut name = vec![0u16; len as usize + 1];
-        if len > 1 {
+        if len >= 1 {
             let copied = unsafe { GetWindowTextW(self.window, &mut name) };
             if copied == 0 {
                 return Ok(String::new());

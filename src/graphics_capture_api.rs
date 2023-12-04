@@ -17,11 +17,12 @@ use windows::{
         DirectX::{Direct3D11::IDirect3DDevice, DirectXPixelFormat},
     },
     Win32::{
+        Foundation::{LPARAM, WPARAM},
         Graphics::Direct3D11::{
             ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_TEXTURE2D_DESC,
         },
         System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess,
-        UI::WindowsAndMessaging::PostQuitMessage,
+        UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT},
     },
 };
 
@@ -89,6 +90,7 @@ impl GraphicsCaptureApi {
         capture_cursor: Option<bool>,
         draw_border: Option<bool>,
         color_format: ColorFormat,
+        thread_id: u32,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         // Check Support
         if !ApiInformation::IsApiContractPresentByMajor(
@@ -136,15 +138,22 @@ impl GraphicsCaptureApi {
                 move |_, _| {
                     halt_closed.store(true, atomic::Ordering::Relaxed);
 
-                    // To Stop Messge Loop
-                    unsafe { PostQuitMessage(0) };
-
                     // Notify The Struct That The Capture Session Is Closed
                     let result = callback_closed.lock().on_closed();
 
                     let _ = RESULT
                         .replace(Some(result))
                         .expect("Failed To Replace RESULT");
+
+                    // To Stop Messge Loop
+                    unsafe {
+                        PostThreadMessageW(
+                            thread_id,
+                            WM_QUIT,
+                            WPARAM::default(),
+                            LPARAM::default(),
+                        )?;
+                    };
 
                     Result::Ok(())
                 }
@@ -245,7 +254,14 @@ impl GraphicsCaptureApi {
                         halt_frame_pool.store(true, atomic::Ordering::Relaxed);
 
                         // To Stop Messge Loop
-                        unsafe { PostQuitMessage(0) };
+                        unsafe {
+                            PostThreadMessageW(
+                                thread_id,
+                                WM_QUIT,
+                                WPARAM::default(),
+                                LPARAM::default(),
+                            )?;
+                        };
                     }
 
                     Result::Ok(())
