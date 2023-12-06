@@ -229,7 +229,7 @@ class WindowsCapture:
         if self.frame_handler:
             internal_capture_control = InternalCaptureControl(stop_list)
 
-            row_pitch = buf_len / height
+            row_pitch = int(buf_len / height)
             if row_pitch == width * 4:
                 ndarray = numpy.ctypeslib.as_array(
                     ctypes.cast(buf, ctypes.POINTER(ctypes.c_uint8)),
