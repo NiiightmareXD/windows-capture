@@ -3,8 +3,7 @@ use std::{
     os::windows::prelude::AsRawHandle,
     sync::{
         atomic::{self, AtomicBool},
-        mpsc::{self, SendError},
-        Arc,
+        mpsc, Arc,
     },
     thread::{self, JoinHandle},
 };
@@ -171,10 +170,10 @@ pub enum WindowsCaptureError<E> {
     FailedToSetDispatcherQueueCompletedHandler,
     #[error("Graphics Capture Error")]
     GraphicsCaptureError(graphics_capture_api::Error),
-    #[error("Handler Error")]
-    HandlerError(E),
-    #[error(transparent)]
-    FailedToThreadID(SendError<u32>),
+    #[error("New Handler Error")]
+    NewHandlerError(E),
+    #[error("Frame Handler Error")]
+    FrameHandlerError(E),
 }
 
 /// Event Handler Trait
@@ -218,7 +217,7 @@ pub trait WindowsCaptureHandler: Sized {
         info!("Starting Capture Thread");
         let result = Arc::new(Mutex::new(None));
         let callback = Arc::new(Mutex::new(
-            Self::new(settings.flags).map_err(WindowsCaptureError::HandlerError)?,
+            Self::new(settings.flags).map_err(WindowsCaptureError::NewHandlerError)?,
         ));
         let mut capture = GraphicsCaptureApi::new(
             settings.item,
@@ -279,7 +278,7 @@ pub trait WindowsCaptureHandler: Sized {
         // Check Handler Result
         trace!("Checking Handler Result");
         if let Some(e) = result.lock().take() {
-            return Err(WindowsCaptureError::HandlerError(e));
+            return Err(WindowsCaptureError::FrameHandlerError(e));
         }
 
         Ok(())
@@ -326,7 +325,7 @@ pub trait WindowsCaptureHandler: Sized {
                 info!("Starting Capture Thread");
                 let result = Arc::new(Mutex::new(None));
                 let callback = Arc::new(Mutex::new(
-                    Self::new(settings.flags).map_err(WindowsCaptureError::HandlerError)?,
+                    Self::new(settings.flags).map_err(WindowsCaptureError::NewHandlerError)?,
                 ));
                 let mut capture = GraphicsCaptureApi::new(
                     settings.item,
@@ -397,7 +396,7 @@ pub trait WindowsCaptureHandler: Sized {
                 // Check Handler Result
                 trace!("Checking Handler Result");
                 if let Some(e) = result.lock().take() {
-                    return Err(WindowsCaptureError::HandlerError(e));
+                    return Err(WindowsCaptureError::FrameHandlerError(e));
                 }
 
                 Ok(())
