@@ -1,4 +1,4 @@
-# Windows Capture &emsp; [![Licence]][Licence URL] [![Build Status]][repository] [![Latest Version]][crates.io]
+# Windows Capture &emsp; [![Licence]][Licence URL] [![Build Status]][repository] [![Latest Version]][pypi.org]
 
 [Licence]: https://img.shields.io/crates/l/windows-capture
 [Licence URL]: https://github.com/NiiightmareXD/windows-capture/blob/main/LICENCE
