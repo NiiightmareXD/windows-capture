@@ -103,13 +103,11 @@
 //! // Every Error From on_closed and on_frame_arrived Will End Up Here
 //! Capture::start(settings).unwrap();
 //! ```
-#![warn(clippy::semicolon_if_nothing_returned)]
-#![warn(clippy::inconsistent_struct_constructor)]
-#![warn(clippy::must_use_candidate)]
-#![warn(clippy::ptr_as_ptr)]
-#![warn(clippy::borrow_as_ptr)]
+#![warn(clippy::pedantic)]
 #![warn(clippy::nursery)]
 #![warn(clippy::cargo)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_panics_doc)]
 
 pub mod capture;
 mod d3d11;

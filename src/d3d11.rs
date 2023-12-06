@@ -1,5 +1,3 @@
-use std::error::Error;
-
 use windows::{
     core::ComInterface,
     Graphics::DirectX::Direct3D11::IDirect3DDevice,
@@ -12,7 +10,7 @@ use windows::{
             },
             Direct3D11::{
                 D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext,
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION,
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION,
             },
             Dxgi::IDXGIDevice,
         },
@@ -33,15 +31,16 @@ impl<T> SendDirectX<T> {
 unsafe impl<T> Send for SendDirectX<T> {}
 
 /// Used To Handle DirectX Errors
-#[derive(thiserror::Error, Eq, PartialEq, Clone, Copy, Debug)]
-pub enum DirectXErrors {
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
     #[error("Failed To Create DirectX Device With The Recommended Feature Level")]
     FeatureLevelNotSatisfied,
+    #[error(transparent)]
+    WindowsError(#[from] windows::core::Error),
 }
 
-/// Create ID3D11Device And ID3D11DeviceContext
-pub fn create_d3d_device()
--> Result<(ID3D11Device, ID3D11DeviceContext), Box<dyn Error + Send + Sync>> {
+/// Create `ID3D11Device` An`ID3D11DeviceContext`xt
+pub fn create_d3d_device(bgra_support: bool) -> Result<(ID3D11Device, ID3D11DeviceContext), Error> {
     // Set Feature Flags
     let feature_flags = [
         D3D_FEATURE_LEVEL_11_1,
@@ -62,7 +61,11 @@ pub fn create_d3d_device()
             None,
             D3D_DRIVER_TYPE_HARDWARE,
             None,
-            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            if bgra_support {
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT
+            } else {
+                D3D11_CREATE_DEVICE_FLAG(0)
+            },
             Some(&feature_flags),
             D3D11_SDK_VERSION,
             Some(&mut d3d_device),
@@ -72,16 +75,14 @@ pub fn create_d3d_device()
     };
 
     if feature_level != D3D_FEATURE_LEVEL_11_1 {
-        return Err(Box::new(DirectXErrors::FeatureLevelNotSatisfied));
+        return Err(Error::FeatureLevelNotSatisfied);
     }
 
     Ok((d3d_device.unwrap(), d3d_device_context.unwrap()))
 }
 
-/// Create A IDirect3DDevice From ID3D11Device
-pub fn create_direct3d_device(
-    d3d_device: &ID3D11Device,
-) -> Result<IDirect3DDevice, Box<dyn Error + Send + Sync>> {
+/// Create A `IDirect3DDevice` From `ID3D11Device`
+pub fn create_direct3d_device(d3d_device: &ID3D11Device) -> Result<IDirect3DDevice, Error> {
     let dxgi_device: IDXGIDevice = d3d_device.cast()?;
     let inspectable = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi_device)? };
     let device: IDirect3DDevice = inspectable.cast()?;

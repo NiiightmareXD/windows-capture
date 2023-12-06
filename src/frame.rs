@@ -1,4 +1,4 @@
-use std::{error::Error, path::Path, ptr, slice};
+use std::{path::Path, ptr, slice};
 
 use image::{Rgb, RgbImage};
 use log::trace;
@@ -15,10 +15,14 @@ use windows::Win32::Graphics::{
 use crate::settings::ColorFormat;
 
 /// Used To Handle Frame Errors
-#[derive(thiserror::Error, Eq, PartialEq, Clone, Copy, Debug)]
-pub enum FrameError {
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
     #[error("Invalid Box Size")]
     InvalidSize,
+    #[error(transparent)]
+    ImageSaveFailed(#[from] image::error::ImageError),
+    #[error(transparent)]
+    WindowsError(#[from] windows::core::Error),
 }
 
 /// Frame Struct Used To Get The Frame Buffer
@@ -68,7 +72,7 @@ impl<'a> Frame<'a> {
     }
 
     /// Get The Frame Buffer
-    pub fn buffer(&mut self) -> Result<FrameBuffer, Box<dyn Error + Send + Sync>> {
+    pub fn buffer(&mut self) -> Result<FrameBuffer, Error> {
         // Texture Settings
         let texture_desc = D3D11_TEXTURE2D_DESC {
             Width: self.width,
@@ -144,9 +148,9 @@ impl<'a> Frame<'a> {
         start_height: u32,
         end_width: u32,
         end_height: u32,
-    ) -> Result<FrameBuffer, Box<dyn Error + Send + Sync>> {
+    ) -> Result<FrameBuffer, Error> {
         if start_width >= end_width || start_height >= end_height {
-            return Err(Box::new(FrameError::InvalidSize));
+            return Err(Error::InvalidSize);
         }
 
         let texture_width = end_width - start_width;
@@ -240,10 +244,7 @@ impl<'a> Frame<'a> {
     }
 
     /// Save The Frame Buffer As An Image To The Specified Path
-    pub fn save_as_image<T: AsRef<Path>>(
-        &mut self,
-        path: T,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub fn save_as_image<T: AsRef<Path>>(&mut self, path: T) -> Result<(), Error> {
         let frame_buffer = self.buffer()?;
 
         frame_buffer.save_as_image(path)?;
@@ -253,6 +254,7 @@ impl<'a> Frame<'a> {
 }
 
 /// Frame Buffer Struct Used To Get Raw Pixel Data
+#[allow(clippy::module_name_repetitions)]
 pub struct FrameBuffer<'a> {
     raw_buffer: &'a mut [u8],
     buffer: &'a mut Vec<u8>,
@@ -324,9 +326,7 @@ impl<'a> FrameBuffer<'a> {
 
     /// Get The Raw Pixel Data Without Padding
     #[allow(clippy::type_complexity)]
-    pub fn as_raw_nopadding_buffer(
-        &'a mut self,
-    ) -> Result<&'a mut [u8], Box<dyn Error + Send + Sync>> {
+    pub fn as_raw_nopadding_buffer(&'a mut self) -> Result<&'a mut [u8], Error> {
         if !self.has_padding() {
             return Ok(self.raw_buffer);
         }
@@ -356,10 +356,7 @@ impl<'a> FrameBuffer<'a> {
     }
 
     /// Save The Frame Buffer As An Image To The Specified Path
-    pub fn save_as_image<T: AsRef<Path>>(
-        &self,
-        path: T,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub fn save_as_image<T: AsRef<Path>>(&self, path: T) -> Result<(), Error> {
         let mut rgb_image: RgbImage = RgbImage::new(self.width, self.height);
 
         if self.color_format == ColorFormat::Rgba8 {

@@ -1,10 +1,6 @@
-use std::{
-    cell::RefCell,
-    error::Error,
-    sync::{
-        atomic::{self, AtomicBool},
-        Arc,
-    },
+use std::sync::{
+    atomic::{self, AtomicBool},
+    Arc,
 };
 
 use log::{info, trace};
@@ -28,18 +24,14 @@ use windows::{
 
 use crate::{
     capture::WindowsCaptureHandler,
-    d3d11::{create_d3d_device, create_direct3d_device, SendDirectX},
+    d3d11::{self, create_d3d_device, create_direct3d_device, SendDirectX},
     frame::Frame,
     settings::ColorFormat,
 };
 
-thread_local! {
-    pub static RESULT: RefCell<Option<Result<(), Box<dyn Error + Send + Sync>>>> = RefCell::new(Some(Ok(())));
-}
-
-/// Used To Handle Capture Errors
-#[derive(thiserror::Error, Eq, PartialEq, Clone, Copy, Debug)]
-pub enum WindowsCaptureError {
+/// Used To Handle Graphics Capture Errors
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
     #[error("Graphics Capture API Is Not Supported")]
     Unsupported,
     #[error("Graphics Capture API Toggling Cursor Capture Is Not Supported")]
@@ -48,6 +40,10 @@ pub enum WindowsCaptureError {
     BorderConfigUnsupported,
     #[error("Already Started")]
     AlreadyStarted,
+    #[error(transparent)]
+    DirectXError(#[from] d3d11::Error),
+    #[error(transparent)]
+    WindowsError(#[from] windows::core::Error),
 }
 
 /// Struct Used To Control Capture Thread
@@ -84,25 +80,28 @@ pub struct GraphicsCaptureApi {
 
 impl GraphicsCaptureApi {
     /// Create A New Graphics Capture Api Struct
-    pub fn new<T: WindowsCaptureHandler + Send + 'static>(
+    #[allow(clippy::too_many_lines)]
+    pub fn new<T: WindowsCaptureHandler<Error = E> + Send + 'static, E: Send + Sync + 'static>(
         item: GraphicsCaptureItem,
         callback: Arc<Mutex<T>>,
         capture_cursor: Option<bool>,
         draw_border: Option<bool>,
         color_format: ColorFormat,
         thread_id: u32,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        result: Arc<Mutex<Option<E>>>,
+    ) -> Result<Self, Error> {
         // Check Support
         if !ApiInformation::IsApiContractPresentByMajor(
             &HSTRING::from("Windows.Foundation.UniversalApiContract"),
             8,
         )? {
-            return Err(Box::new(WindowsCaptureError::Unsupported));
+            return Err(Error::Unsupported);
         }
 
         // Create DirectX Devices
         trace!("Creating DirectX Devices");
-        let (d3d_device, d3d_device_context) = create_d3d_device()?;
+        let (d3d_device, d3d_device_context) =
+            create_d3d_device(color_format == ColorFormat::Bgra8)?;
         let direct3d_device = create_direct3d_device(&d3d_device)?;
 
         let pixel_format = if color_format == ColorFormat::Rgba8 {
@@ -134,16 +133,15 @@ impl GraphicsCaptureApi {
                 // Init
                 let callback_closed = callback.clone();
                 let halt_closed = halt.clone();
+                let result_closed = result.clone();
 
                 move |_, _| {
                     halt_closed.store(true, atomic::Ordering::Relaxed);
 
                     // Notify The Struct That The Capture Session Is Closed
-                    let result = callback_closed.lock().on_closed();
-
-                    let _ = RESULT
-                        .replace(Some(result))
-                        .expect("Failed To Replace RESULT");
+                    if let Err(e) = callback_closed.lock().on_closed() {
+                        *result_closed.lock() = Some(e);
+                    }
 
                     // To Stop Messge Loop
                     unsafe {
@@ -168,6 +166,7 @@ impl GraphicsCaptureApi {
                 let halt_frame_pool = halt.clone();
                 let d3d_device_frame_pool = d3d_device.clone();
                 let context = d3d_device_context.clone();
+                let result_frame_pool = result;
 
                 let mut last_size = item.Size()?;
                 let callback_frame_pool = callback;
@@ -247,9 +246,9 @@ impl GraphicsCaptureApi {
                         .on_frame_arrived(&mut frame, internal_capture_control);
 
                     if stop.load(atomic::Ordering::Relaxed) || result.is_err() {
-                        let _ = RESULT
-                            .replace(Some(result))
-                            .expect("Failed To Replace RESULT");
+                        if let Err(e) = result {
+                            *result_frame_pool.lock() = Some(e);
+                        }
 
                         halt_frame_pool.store(true, atomic::Ordering::Relaxed);
 
@@ -284,10 +283,10 @@ impl GraphicsCaptureApi {
     }
 
     /// Start Capture
-    pub fn start_capture(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub fn start_capture(&mut self) -> Result<(), Error> {
         // Check If The Capture Is Already Installed
         if self.active {
-            return Err(Box::new(WindowsCaptureError::AlreadyStarted));
+            return Err(Error::AlreadyStarted);
         }
 
         // Config
@@ -301,7 +300,7 @@ impl GraphicsCaptureApi {
                     .unwrap()
                     .SetIsCursorCaptureEnabled(self.capture_cursor.unwrap())?;
             } else {
-                return Err(Box::new(WindowsCaptureError::CursorConfigUnsupported));
+                return Err(Error::CursorConfigUnsupported);
             }
         }
 
@@ -315,7 +314,7 @@ impl GraphicsCaptureApi {
                     .unwrap()
                     .SetIsBorderRequired(self.draw_border.unwrap())?;
             } else {
-                return Err(Box::new(WindowsCaptureError::BorderConfigUnsupported));
+                return Err(Error::BorderConfigUnsupported);
             }
         }
 
@@ -345,7 +344,7 @@ impl GraphicsCaptureApi {
     }
 
     /// Check If Windows Graphics Capture Api Is Supported
-    pub fn is_supported() -> Result<bool, Box<dyn Error + Send + Sync>> {
+    pub fn is_supported() -> Result<bool, Error> {
         Ok(ApiInformation::IsApiContractPresentByMajor(
             &HSTRING::from("Windows.Foundation.UniversalApiContract"),
             8,
@@ -353,7 +352,7 @@ impl GraphicsCaptureApi {
     }
 
     /// Check If You Can Toggle The Cursor On Or Off
-    pub fn is_cursor_toggle_supported() -> Result<bool, Box<dyn Error + Send + Sync>> {
+    pub fn is_cursor_toggle_supported() -> Result<bool, Error> {
         Ok(ApiInformation::IsPropertyPresent(
             &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
             &HSTRING::from("IsCursorCaptureEnabled"),
@@ -361,7 +360,7 @@ impl GraphicsCaptureApi {
     }
 
     /// Check If You Can Toggle The Border On Or Off
-    pub fn is_border_toggle_supported() -> Result<bool, Box<dyn Error + Send + Sync>> {
+    pub fn is_border_toggle_supported() -> Result<bool, Error> {
         Ok(ApiInformation::IsPropertyPresent(
             &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
             &HSTRING::from("IsBorderRequired"),

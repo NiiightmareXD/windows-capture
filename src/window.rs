@@ -1,4 +1,4 @@
-use std::{error::Error, ptr};
+use std::{ptr, string::FromUtf16Error};
 
 use log::warn;
 use windows::{
@@ -18,12 +18,16 @@ use windows::{
 };
 
 /// Used To Handle Window Errors
-#[derive(thiserror::Error, Eq, PartialEq, Clone, Copy, Debug)]
-pub enum WindowErrors {
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
     #[error("Failed To Get The Foreground Window")]
     NoActiveWindow,
     #[error("Failed To Find Window")]
     NotFound,
+    #[error(transparent)]
+    FailedToConvertWindowsString(#[from] FromUtf16Error),
+    #[error(transparent)]
+    WindowsError(#[from] windows::core::Error),
 }
 
 /// Represents A Windows
@@ -33,31 +37,31 @@ pub struct Window {
 }
 
 impl Window {
-    /// Get The Currently Active Foreground Window
-    pub fn foreground() -> Result<Self, Box<dyn Error + Send + Sync>> {
+    /// Get The Currently Active Window
+    pub fn foreground() -> Result<Self, Error> {
         let window = unsafe { GetForegroundWindow() };
 
         if window.0 == 0 {
-            return Err(Box::new(WindowErrors::NoActiveWindow));
+            return Err(Error::NoActiveWindow);
         }
 
         Ok(Self { window })
     }
 
     /// Create From A Window Name
-    pub fn from_name(title: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    pub fn from_name(title: &str) -> Result<Self, Error> {
         let title = HSTRING::from(title);
         let window = unsafe { FindWindowW(None, &title) };
 
         if window.0 == 0 {
-            return Err(Box::new(WindowErrors::NotFound));
+            return Err(Error::NotFound);
         }
 
         Ok(Self { window })
     }
 
     /// Create From A Window Name Substring
-    pub fn from_contains_name(title: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    pub fn from_contains_name(title: &str) -> Result<Self, Error> {
         let windows = Self::enumerate()?;
 
         let mut target_window = None;
@@ -68,14 +72,14 @@ impl Window {
             }
         }
 
-        Ok(target_window.map_or_else(|| Err(Box::new(WindowErrors::NotFound)), Ok)?)
+        target_window.map_or_else(|| Err(Error::NotFound), Ok)
     }
 
     /// Get Window Title
-    pub fn title(&self) -> Result<String, Box<dyn Error + Send + Sync>> {
+    pub fn title(&self) -> Result<String, Error> {
         let len = unsafe { GetWindowTextLengthW(self.window) };
 
-        let mut name = vec![0u16; len as usize + 1];
+        let mut name = vec![0u16; usize::try_from(len).unwrap() + 1];
         if len >= 1 {
             let copied = unsafe { GetWindowTextW(self.window, &mut name) };
             if copied == 0 {
@@ -114,10 +118,10 @@ impl Window {
             let styles = unsafe { GetWindowLongPtrW(window, GWL_STYLE) };
             let ex_styles = unsafe { GetWindowLongPtrW(window, GWL_EXSTYLE) };
 
-            if (ex_styles & WS_EX_TOOLWINDOW.0 as isize) != 0 {
+            if (ex_styles & isize::try_from(WS_EX_TOOLWINDOW.0).unwrap()) != 0 {
                 return false;
             }
-            if (styles & WS_CHILD.0 as isize) != 0 {
+            if (styles & isize::try_from(WS_CHILD.0).unwrap()) != 0 {
                 return false;
             }
         } else {
@@ -129,7 +133,7 @@ impl Window {
     }
 
     /// Get A List Of All Windows
-    pub fn enumerate() -> Result<Vec<Self>, Box<dyn Error + Send + Sync>> {
+    pub fn enumerate() -> Result<Vec<Self>, Error> {
         let mut windows: Vec<Self> = Vec::new();
 
         unsafe {
@@ -142,15 +146,6 @@ impl Window {
         };
 
         Ok(windows)
-    }
-
-    /// Wait Until The Window Is The Currently Active Foreground Window
-    pub fn activate(&self) {
-        loop {
-            if unsafe { GetForegroundWindow() } == self.window {
-                break;
-            }
-        }
     }
 
     /// Create From A Raw HWND
@@ -179,7 +174,7 @@ impl Window {
 
 // Automatically Convert Window To GraphicsCaptureItem
 impl TryFrom<Window> for GraphicsCaptureItem {
-    type Error = Box<dyn Error + Send + Sync>;
+    type Error = Error;
 
     fn try_from(value: Window) -> Result<Self, Self::Error> {
         // Get Capture Item From HWND

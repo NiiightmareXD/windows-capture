@@ -25,8 +25,4 @@ pyo3 = { version = "0.20.0", features = [
     "extension-module",
     "auto-initialize",
 ] }
-windows = { version = "0.52.0", features = [
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_Foundation",
-] }
 windows-capture = { path = ".." }

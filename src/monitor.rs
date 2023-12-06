@@ -1,4 +1,4 @@
-use std::{error::Error, mem, ptr};
+use std::{mem, num::ParseIntError, ptr, string::FromUtf16Error};
 
 use windows::{
     core::PCWSTR,
@@ -22,8 +22,8 @@ use windows::{
 };
 
 /// Used To Handle Monitor Errors
-#[derive(thiserror::Error, Eq, PartialEq, Clone, Copy, Debug)]
-pub enum MonitorErrors {
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
     #[error("Failed To Find Monitor")]
     NotFound,
     #[error("Failed To Find Monitor Name")]
@@ -34,6 +34,12 @@ pub enum MonitorErrors {
     FailedToGetMonitorInfo,
     #[error("Failed To Get Monitor Name")]
     FailedToGetMonitorName,
+    #[error(transparent)]
+    FailedToParseMonitorIndex(#[from] ParseIntError),
+    #[error(transparent)]
+    FailedToConvertWindowsString(#[from] FromUtf16Error),
+    #[error(transparent)]
+    WindowsError(#[from] windows::core::Error),
 }
 
 /// Represents A Monitor Device
@@ -44,42 +50,42 @@ pub struct Monitor {
 
 impl Monitor {
     /// Get The Primary Monitor
-    pub fn primary() -> Result<Self, Box<dyn Error + Send + Sync>> {
+    pub fn primary() -> Result<Self, Error> {
         let point = POINT { x: 0, y: 0 };
         let monitor = unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY) };
 
         if monitor.is_invalid() {
-            return Err(Box::new(MonitorErrors::NotFound));
+            return Err(Error::NotFound);
         }
 
         Ok(Self { monitor })
     }
 
     /// Get The Monitor From It's Index
-    pub fn from_index(index: usize) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    pub fn from_index(index: usize) -> Result<Self, Error> {
         if index < 1 {
-            return Err(Box::new(MonitorErrors::IndexIsLowerThanOne));
+            return Err(Error::IndexIsLowerThanOne);
         }
 
         let monitor = Self::enumerate()?;
         let monitor = match monitor.get(index - 1) {
             Some(monitor) => *monitor,
-            None => return Err(Box::new(MonitorErrors::NotFound)),
+            None => return Err(Error::NotFound),
         };
 
         Ok(monitor)
     }
 
-    pub fn index(&self) -> Result<usize, Box<dyn Error + Send + Sync>> {
+    pub fn index(&self) -> Result<usize, Error> {
         let device_name = self.device_name()?;
-        Ok(device_name.replace("\\\\.\\DISPLAY1", "to").parse()?)
+        Ok(device_name.replace("\\\\.\\DISPLAY", "").parse()?)
     }
 
     /// Get Monitor Name
-    pub fn name(&self) -> Result<String, Box<dyn Error + Send + Sync>> {
+    pub fn name(&self) -> Result<String, Error> {
         let mut monitor_info = MONITORINFOEXW {
             monitorInfo: MONITORINFO {
-                cbSize: mem::size_of::<MONITORINFOEXW>() as u32,
+                cbSize: u32::try_from(mem::size_of::<MONITORINFOEXW>()).unwrap(),
                 rcMonitor: RECT::default(),
                 rcWork: RECT::default(),
                 dwFlags: 0,
@@ -93,7 +99,7 @@ impl Monitor {
             )
             .as_bool()
         } {
-            return Err(Box::new(MonitorErrors::FailedToGetMonitorInfo));
+            return Err(Error::FailedToGetMonitorInfo);
         }
 
         let mut number_of_paths = 0;
@@ -123,7 +129,8 @@ impl Monitor {
             let mut source = DISPLAYCONFIG_SOURCE_DEVICE_NAME {
                 header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
                     r#type: DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
-                    size: mem::size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32,
+                    size: u32::try_from(mem::size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>())
+                        .unwrap(),
                     adapterId: path.sourceInfo.adapterId,
                     id: path.sourceInfo.id,
                 },
@@ -147,7 +154,8 @@ impl Monitor {
                 let mut target = DISPLAYCONFIG_TARGET_DEVICE_NAME {
                     header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
                         r#type: DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
-                        size: mem::size_of::<DISPLAYCONFIG_TARGET_DEVICE_NAME>() as u32,
+                        size: u32::try_from(mem::size_of::<DISPLAYCONFIG_TARGET_DEVICE_NAME>())
+                            .unwrap(),
                         adapterId: path.sourceInfo.adapterId,
                         id: path.targetInfo.id,
                     },
@@ -171,20 +179,20 @@ impl Monitor {
                             .collect::<Vec<_>>(),
                     )?;
                     return Ok(name);
-                } else {
-                    return Err(Box::new(MonitorErrors::FailedToGetMonitorInfo));
                 }
+
+                return Err(Error::FailedToGetMonitorInfo);
             }
         }
 
-        Err(Box::new(MonitorErrors::NameNotFound))
+        Err(Error::NameNotFound)
     }
 
     /// Get Monitor Device Name
-    pub fn device_name(&self) -> Result<String, Box<dyn Error + Send + Sync>> {
+    pub fn device_name(&self) -> Result<String, Error> {
         let mut monitor_info = MONITORINFOEXW {
             monitorInfo: MONITORINFO {
-                cbSize: mem::size_of::<MONITORINFOEXW>() as u32,
+                cbSize: u32::try_from(mem::size_of::<MONITORINFOEXW>()).unwrap(),
                 rcMonitor: RECT::default(),
                 rcWork: RECT::default(),
                 dwFlags: 0,
@@ -198,7 +206,7 @@ impl Monitor {
             )
             .as_bool()
         } {
-            return Err(Box::new(MonitorErrors::FailedToGetMonitorInfo));
+            return Err(Error::FailedToGetMonitorInfo);
         }
 
         let device_name = String::from_utf16(
@@ -215,10 +223,10 @@ impl Monitor {
     }
 
     /// Get Monitor Device String
-    pub fn device_string(&self) -> Result<String, Box<dyn Error + Send + Sync>> {
+    pub fn device_string(&self) -> Result<String, Error> {
         let mut monitor_info = MONITORINFOEXW {
             monitorInfo: MONITORINFO {
-                cbSize: mem::size_of::<MONITORINFOEXW>() as u32,
+                cbSize: u32::try_from(mem::size_of::<MONITORINFOEXW>()).unwrap(),
                 rcMonitor: RECT::default(),
                 rcWork: RECT::default(),
                 dwFlags: 0,
@@ -232,11 +240,11 @@ impl Monitor {
             )
             .as_bool()
         } {
-            return Err(Box::new(MonitorErrors::FailedToGetMonitorInfo));
+            return Err(Error::FailedToGetMonitorInfo);
         }
 
         let mut display_device = DISPLAY_DEVICEW {
-            cb: mem::size_of::<DISPLAY_DEVICEW>() as u32,
+            cb: u32::try_from(mem::size_of::<DISPLAY_DEVICEW>()).unwrap(),
             DeviceName: [0; 32],
             DeviceString: [0; 128],
             StateFlags: 0,
@@ -253,7 +261,7 @@ impl Monitor {
             )
             .as_bool()
         } {
-            return Err(Box::new(MonitorErrors::FailedToGetMonitorName));
+            return Err(Error::FailedToGetMonitorName);
         }
 
         let device_string = String::from_utf16(
@@ -270,7 +278,7 @@ impl Monitor {
     }
 
     /// Get A List Of All Monitors
-    pub fn enumerate() -> Result<Vec<Self>, Box<dyn Error + Send + Sync>> {
+    pub fn enumerate() -> Result<Vec<Self>, Error> {
         let mut monitors: Vec<Self> = Vec::new();
 
         unsafe {
@@ -315,7 +323,7 @@ impl Monitor {
 
 // Automatically Convert Monitor To GraphicsCaptureItem
 impl TryFrom<Monitor> for GraphicsCaptureItem {
-    type Error = Box<dyn Error + Send + Sync>;
+    type Error = Error;
 
     fn try_from(value: Monitor) -> Result<Self, Self::Error> {
         // Get Capture Item From HMONITOR

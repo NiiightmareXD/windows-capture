@@ -563,7 +563,6 @@ name = "windows-capture-python"
 version = "1.0.45"
 dependencies = [
  "pyo3",
- "windows",
  "windows-capture",
 ]
 

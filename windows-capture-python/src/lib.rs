@@ -1,36 +1,21 @@
-#![warn(clippy::semicolon_if_nothing_returned)]
-#![warn(clippy::inconsistent_struct_constructor)]
-#![warn(clippy::must_use_candidate)]
-#![warn(clippy::ptr_as_ptr)]
-#![warn(clippy::borrow_as_ptr)]
+#![warn(clippy::pedantic)]
 #![warn(clippy::nursery)]
 #![warn(clippy::cargo)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_panics_doc)]
 #![allow(clippy::redundant_pub_crate)]
 
-use std::{
-    error::Error,
-    os::windows::io::AsRawHandle,
-    sync::{
-        atomic::{self, AtomicBool},
-        Arc,
-    },
-    thread::JoinHandle,
-};
+use std::{error::Error, sync::Arc};
 
 use ::windows_capture::{
-    capture::{CaptureControlError, WindowsCaptureHandler},
+    capture::{CaptureControl, WindowsCaptureHandler},
     frame::Frame,
     graphics_capture_api::InternalCaptureControl,
     monitor::Monitor,
-    settings::{ColorFormat, WindowsCaptureSettings},
+    settings::{ColorFormat, Settings},
     window::Window,
 };
 use pyo3::{exceptions::PyException, prelude::*, types::PyList};
-use windows::Win32::{
-    Foundation::{HANDLE, LPARAM, WPARAM},
-    System::Threading::GetThreadId,
-    UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT},
-};
 
 /// Fastest Windows Screen Capture Library For Python 🔥.
 #[pymodule]
@@ -43,11 +28,14 @@ fn windows_capture(_py: Python, m: &PyModule) -> PyResult<()> {
 /// Internal Struct Used To Handle Free Threaded Start
 #[pyclass]
 pub struct NativeCaptureControl {
-    capture_control: Option<NoGenericCaptureControl>,
+    capture_control:
+        Option<CaptureControl<InnerNativeWindowsCapture, Box<dyn Error + Send + Sync>>>,
 }
 
 impl NativeCaptureControl {
-    const fn new(capture_control: NoGenericCaptureControl) -> Self {
+    const fn new(
+        capture_control: CaptureControl<InnerNativeWindowsCapture, Box<dyn Error + Send + Sync>>,
+    ) -> Self {
         Self {
             capture_control: Some(capture_control),
         }
@@ -60,7 +48,7 @@ impl NativeCaptureControl {
     pub fn is_finished(&self) -> bool {
         self.capture_control
             .as_ref()
-            .map_or(true, |capture_control| capture_control.is_finished())
+            .map_or(true, CaptureControl::is_finished)
     }
 
     pub fn wait(&mut self, py: Python) -> PyResult<()> {
@@ -69,7 +57,7 @@ impl NativeCaptureControl {
         py.allow_threads(|| {
             if let Some(capture_control) = self.capture_control.take() {
                 match capture_control.wait() {
-                    Ok(_) => (),
+                    Ok(()) => (),
                     Err(e) => {
                         return Err(PyException::new_err(format!(
                             "Failed To Join The Capture Thread -> {e}"
@@ -90,7 +78,7 @@ impl NativeCaptureControl {
         py.allow_threads(|| {
             if let Some(capture_control) = self.capture_control.take() {
                 match capture_control.stop() {
-                    Ok(_) => (),
+                    Ok(()) => (),
                     Err(e) => {
                         return Err(PyException::new_err(format!(
                             "Failed To Stop The Capture Thread -> {e}"
@@ -101,87 +89,6 @@ impl NativeCaptureControl {
 
             Ok(())
         })?;
-
-        Ok(())
-    }
-}
-
-/// Because The Default Rust Capture Control Contains Generic That Is
-/// Unsupported By Python
-pub struct NoGenericCaptureControl {
-    thread_handle: Option<JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>>,
-    halt_handle: Arc<AtomicBool>,
-}
-
-impl NoGenericCaptureControl {
-    #[must_use]
-    pub fn new(
-        thread_handle: JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>,
-        halt_handle: Arc<AtomicBool>,
-    ) -> Self {
-        Self {
-            thread_handle: Some(thread_handle),
-            halt_handle,
-        }
-    }
-
-    #[must_use]
-    pub fn is_finished(&self) -> bool {
-        self.thread_handle
-            .as_ref()
-            .map_or(true, |thread_handle| thread_handle.is_finished())
-    }
-
-    pub fn wait(mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        if let Some(thread_handle) = self.thread_handle.take() {
-            match thread_handle.join() {
-                Ok(result) => result?,
-                Err(_) => {
-                    return Err(Box::new(CaptureControlError::FailedToJoinThread));
-                }
-            }
-        } else {
-            return Err(Box::new(CaptureControlError::ThreadHandleIsTaken));
-        }
-
-        Ok(())
-    }
-
-    /// Gracefully Stop The Capture Thread
-    pub fn stop(mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.halt_handle.store(true, atomic::Ordering::Relaxed);
-
-        if let Some(thread_handle) = self.thread_handle.take() {
-            let handle = thread_handle.as_raw_handle();
-            let handle = HANDLE(handle as isize);
-            let therad_id = unsafe { GetThreadId(handle) };
-
-            loop {
-                match unsafe {
-                    PostThreadMessageW(therad_id, WM_QUIT, WPARAM::default(), LPARAM::default())
-                } {
-                    Ok(_) => break,
-                    Err(e) => {
-                        if thread_handle.is_finished() {
-                            break;
-                        }
-
-                        if e.code().0 != -2147023452 {
-                            Err(e)?;
-                        }
-                    }
-                }
-            }
-
-            match thread_handle.join() {
-                Ok(result) => result?,
-                Err(_) => {
-                    return Err(Box::new(CaptureControlError::FailedToJoinThread));
-                }
-            }
-        } else {
-            return Err(Box::new(CaptureControlError::ThreadHandleIsTaken));
-        }
 
         Ok(())
     }
@@ -241,7 +148,7 @@ impl NativeWindowsCapture {
                 }
             };
 
-            match WindowsCaptureSettings::new(
+            match Settings::new(
                 window,
                 self.capture_cursor,
                 self.draw_border,
@@ -268,7 +175,7 @@ impl NativeWindowsCapture {
                 }
             };
 
-            match WindowsCaptureSettings::new(
+            match Settings::new(
                 monitor,
                 self.capture_cursor,
                 self.draw_border,
@@ -288,7 +195,7 @@ impl NativeWindowsCapture {
         };
 
         match InnerNativeWindowsCapture::start(settings) {
-            Ok(_) => (),
+            Ok(()) => (),
             Err(e) => {
                 return Err(PyException::new_err(format!(
                     "Capture Session Threw An Exception -> {e}"
@@ -311,7 +218,7 @@ impl NativeWindowsCapture {
                 }
             };
 
-            match WindowsCaptureSettings::new(
+            match Settings::new(
                 window,
                 self.capture_cursor,
                 self.draw_border,
@@ -338,7 +245,7 @@ impl NativeWindowsCapture {
                 }
             };
 
-            match WindowsCaptureSettings::new(
+            match Settings::new(
                 monitor,
                 self.capture_cursor,
                 self.draw_border,
@@ -366,10 +273,7 @@ impl NativeWindowsCapture {
             }
         };
 
-        let halt_handle = capture_control.halt_handle();
-        let thread_handle = capture_control.into_thread_handle();
-        let no_generic_capture_control = NoGenericCaptureControl::new(thread_handle, halt_handle);
-        let capture_control = NativeCaptureControl::new(no_generic_capture_control);
+        let capture_control = NativeCaptureControl::new(capture_control);
 
         Ok(capture_control)
     }
@@ -382,10 +286,9 @@ struct InnerNativeWindowsCapture {
 
 impl WindowsCaptureHandler for InnerNativeWindowsCapture {
     type Flags = (Arc<PyObject>, Arc<PyObject>);
+    type Error = Box<dyn Error + Send + Sync>;
 
-    fn new(
-        (on_frame_arrived_callback, on_closed): Self::Flags,
-    ) -> Result<Self, Box<(dyn Error + Send + Sync)>> {
+    fn new((on_frame_arrived_callback, on_closed): Self::Flags) -> Result<Self, Self::Error> {
         Ok(Self {
             on_frame_arrived_callback,
             on_closed,
@@ -396,7 +299,7 @@ impl WindowsCaptureHandler for InnerNativeWindowsCapture {
         &mut self,
         frame: &mut Frame,
         capture_control: InternalCaptureControl,
-    ) -> Result<(), Box<(dyn Error + Send + Sync)>> {
+    ) -> Result<(), Self::Error> {
         let width = frame.width();
         let height = frame.height();
         let mut buffer = frame.buffer()?;
