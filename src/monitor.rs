@@ -1,7 +1,7 @@
 use std::{mem, num::ParseIntError, ptr, string::FromUtf16Error};
 
 use windows::{
-    core::PCWSTR,
+    core::{HSTRING, PCWSTR},
     Graphics::Capture::GraphicsCaptureItem,
     Win32::{
         Devices::Display::{
@@ -14,8 +14,9 @@ use windows::{
         },
         Foundation::{BOOL, LPARAM, POINT, RECT, TRUE},
         Graphics::Gdi::{
-            EnumDisplayDevicesW, EnumDisplayMonitors, GetMonitorInfoW, MonitorFromPoint,
-            DISPLAY_DEVICEW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW, MONITOR_DEFAULTTOPRIMARY,
+            EnumDisplayDevicesW, EnumDisplayMonitors, EnumDisplaySettingsW, GetMonitorInfoW,
+            MonitorFromPoint, DEVMODEW, DISPLAY_DEVICEW, ENUM_CURRENT_SETTINGS, HDC, HMONITOR,
+            MONITORINFO, MONITORINFOEXW, MONITOR_DEFAULTTONULL,
         },
         System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop,
     },
@@ -32,6 +33,8 @@ pub enum Error {
     IndexIsLowerThanOne,
     #[error("Failed To Get Monitor Info")]
     FailedToGetMonitorInfo,
+    #[error("Failed To Get Monitor ettings")]
+    FailedToGetMonitorSettings,
     #[error("Failed To Get Monitor Name")]
     FailedToGetMonitorName,
     #[error(transparent)]
@@ -52,7 +55,7 @@ impl Monitor {
     /// Get The Primary Monitor
     pub fn primary() -> Result<Self, Error> {
         let point = POINT { x: 0, y: 0 };
-        let monitor = unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY) };
+        let monitor = unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTONULL) };
 
         if monitor.is_invalid() {
             return Err(Error::NotFound);
@@ -145,7 +148,7 @@ impl Monitor {
                     .iter()
                     .take_while(|ch| **ch != 0x0000)
                     .copied()
-                    .collect::<Vec<_>>(),
+                    .collect::<Vec<u16>>(),
             )?;
 
             if unsafe { DisplayConfigGetDeviceInfo(&mut source.header) } == 0
@@ -176,7 +179,7 @@ impl Monitor {
                             .iter()
                             .take_while(|ch| **ch != 0x0000)
                             .copied()
-                            .collect::<Vec<_>>(),
+                            .collect::<Vec<u16>>(),
                     )?;
                     return Ok(name);
                 }
@@ -216,7 +219,7 @@ impl Monitor {
                 .iter()
                 .take_while(|ch| **ch != 0x0000)
                 .copied()
-                .collect::<Vec<_>>(),
+                .collect::<Vec<u16>>(),
         )?;
 
         Ok(device_name)
@@ -271,10 +274,73 @@ impl Monitor {
                 .iter()
                 .take_while(|ch| **ch != 0x0000)
                 .copied()
-                .collect::<Vec<_>>(),
+                .collect::<Vec<u16>>(),
         )?;
 
         Ok(device_string)
+    }
+
+    /// Get Monitor Width
+    pub fn width(&self) -> Result<u32, Error> {
+        let mut device_mode = DEVMODEW {
+            dmSize: u16::try_from(mem::size_of::<DEVMODEW>()).unwrap(),
+            ..DEVMODEW::default()
+        };
+        let name = HSTRING::from(self.device_name()?);
+        if unsafe {
+            !EnumDisplaySettingsW(
+                PCWSTR(name.as_ptr()),
+                ENUM_CURRENT_SETTINGS,
+                &mut device_mode,
+            )
+            .as_bool()
+        } {
+            return Err(Error::FailedToGetMonitorSettings);
+        }
+
+        Ok(device_mode.dmPelsWidth)
+    }
+
+    /// Get Monitor Height
+    pub fn height(&self) -> Result<u32, Error> {
+        let mut device_mode = DEVMODEW {
+            dmSize: u16::try_from(mem::size_of::<DEVMODEW>()).unwrap(),
+            ..DEVMODEW::default()
+        };
+        let name = HSTRING::from(self.device_name()?);
+        if unsafe {
+            !EnumDisplaySettingsW(
+                PCWSTR(name.as_ptr()),
+                ENUM_CURRENT_SETTINGS,
+                &mut device_mode,
+            )
+            .as_bool()
+        } {
+            return Err(Error::FailedToGetMonitorSettings);
+        }
+
+        Ok(device_mode.dmPelsHeight)
+    }
+
+    /// Get Monitor Refresh Rate
+    pub fn refresh_rate(&self) -> Result<u32, Error> {
+        let mut device_mode = DEVMODEW {
+            dmSize: u16::try_from(mem::size_of::<DEVMODEW>()).unwrap(),
+            ..DEVMODEW::default()
+        };
+        let name = HSTRING::from(self.device_name()?);
+        if unsafe {
+            !EnumDisplaySettingsW(
+                PCWSTR(name.as_ptr()),
+                ENUM_CURRENT_SETTINGS,
+                &mut device_mode,
+            )
+            .as_bool()
+        } {
+            return Err(Error::FailedToGetMonitorSettings);
+        }
+
+        Ok(device_mode.dmDisplayFrequency)
     }
 
     /// Get A List Of All Monitors

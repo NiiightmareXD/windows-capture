@@ -6,6 +6,7 @@ use windows::{
     Graphics::Capture::GraphicsCaptureItem,
     Win32::{
         Foundation::{BOOL, HWND, LPARAM, RECT, TRUE},
+        Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONULL},
         System::{
             Threading::GetCurrentProcessId, WinRT::Graphics::Capture::IGraphicsCaptureItemInterop,
         },
@@ -16,6 +17,8 @@ use windows::{
         },
     },
 };
+
+use crate::monitor::Monitor;
 
 /// Used To Handle Window Errors
 #[derive(thiserror::Error, Debug)]
@@ -97,6 +100,20 @@ impl Window {
         )?;
 
         Ok(name)
+    }
+
+    /// Get The Monitor That Has The Largest Area Of Intersection With The Window, None Means Windows Doesn't Intersect With Any Monitor
+    #[must_use]
+    pub fn monitor(&self) -> Option<Monitor> {
+        let window = self.window;
+
+        let monitor = unsafe { MonitorFromWindow(window, MONITOR_DEFAULTTONULL) };
+
+        if monitor.is_invalid() {
+            None
+        } else {
+            Some(Monitor::from_raw_hmonitor(monitor))
+        }
     }
 
     /// Check If The Window Is A Valid Window

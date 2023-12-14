@@ -113,7 +113,7 @@ impl GraphicsCaptureApi {
         // Create Frame Pool
         trace!("Creating Frame Pool");
         let frame_pool =
-            Direct3D11CaptureFramePool::Create(&direct3d_device, pixel_format, 2, item.Size()?)?;
+            Direct3D11CaptureFramePool::Create(&direct3d_device, pixel_format, 1, item.Size()?)?;
         let frame_pool = Arc::new(frame_pool);
 
         // Create Capture Session
@@ -211,7 +211,7 @@ impl GraphicsCaptureApi {
                             .Recreate(
                                 &direct3d_device_recreate.0,
                                 pixel_format,
-                                2,
+                                1,
                                 frame_content_size,
                             )
                             .unwrap();
