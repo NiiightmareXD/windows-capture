@@ -23,7 +23,7 @@ image = "0.24.7"
 log = "0.4.20"
 parking_lot = "0.12.1"
 rayon = "1.8.0"
-thiserror = "1.0.51"
+thiserror = "1.0.52"
 windows = { version = "0.52.0", features = [
     "Win32_System_WinRT_Graphics_Capture",
     "Win32_Graphics_Direct3D11",
