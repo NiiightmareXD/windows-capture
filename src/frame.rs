@@ -9,7 +9,9 @@ use windows::Win32::Graphics::{
         D3D11_CPU_ACCESS_WRITE, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ_WRITE,
         D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
     },
-    Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC},
+    Dxgi::Common::{
+        DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_NV12, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC,
+    },
 };
 
 use crate::settings::ColorFormat;
@@ -79,10 +81,10 @@ impl<'a> Frame<'a> {
             Height: self.height,
             MipLevels: 1,
             ArraySize: 1,
-            Format: if self.color_format == ColorFormat::Rgba8 {
-                DXGI_FORMAT_R8G8B8A8_UNORM
-            } else {
-                DXGI_FORMAT_B8G8R8A8_UNORM
+            Format: match self.color_format {
+                ColorFormat::Rgba8 => DXGI_FORMAT_R8G8B8A8_UNORM,
+                ColorFormat::Bgra8 => DXGI_FORMAT_B8G8R8A8_UNORM,
+                ColorFormat::NV12 => DXGI_FORMAT_NV12,
             },
             SampleDesc: DXGI_SAMPLE_DESC {
                 Count: 1,
@@ -355,7 +357,7 @@ impl<'a> FrameBuffer<'a> {
         Ok(&mut self.buffer[0..frame_size])
     }
 
-    /// Save The Frame Buffer As An Image To The Specified Path
+    /// Save The Frame Buffer As An Image To The Specified Path (Only `ColorFormat::Rgba8` And `ColorFormat::Bgra8`)
     pub fn save_as_image<T: AsRef<Path>>(&self, path: T) -> Result<(), Error> {
         let mut rgb_image: RgbImage = RgbImage::new(self.width, self.height);
 
@@ -371,7 +373,7 @@ impl<'a> FrameBuffer<'a> {
                     rgb_image.put_pixel(x, y, Rgb([r, g, b]));
                 }
             }
-        } else {
+        } else if self.color_format == ColorFormat::Bgra8 {
             for y in 0..self.height {
                 for x in 0..self.width {
                     let first_index = (y * self.row_pitch + x * 4) as usize;
@@ -383,6 +385,8 @@ impl<'a> FrameBuffer<'a> {
                     rgb_image.put_pixel(x, y, Rgb([r, g, b]));
                 }
             }
+        } else {
+            unimplemented!()
         }
 
         rgb_image.save(path)?;

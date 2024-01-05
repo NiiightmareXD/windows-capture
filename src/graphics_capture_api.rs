@@ -104,10 +104,10 @@ impl GraphicsCaptureApi {
             create_d3d_device(color_format == ColorFormat::Bgra8)?;
         let direct3d_device = create_direct3d_device(&d3d_device)?;
 
-        let pixel_format = if color_format == ColorFormat::Rgba8 {
-            DirectXPixelFormat::R8G8B8A8UIntNormalized
-        } else {
-            DirectXPixelFormat::B8G8R8A8UIntNormalized
+        let pixel_format = match color_format {
+            ColorFormat::Rgba8 => DirectXPixelFormat::R8G8B8A8UIntNormalized,
+            ColorFormat::Bgra8 => DirectXPixelFormat::B8G8R8A8UIntNormalized,
+            ColorFormat::NV12 => DirectXPixelFormat::NV12,
         };
 
         // Create Frame Pool

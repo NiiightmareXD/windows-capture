@@ -12,6 +12,7 @@ pub enum Error {
 pub enum ColorFormat {
     Rgba8,
     Bgra8,
+    NV12,
 }
 
 /// Capture Settings, None Means Default
