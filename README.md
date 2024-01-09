@@ -26,7 +26,7 @@ Add this library to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-windows-capture = "1.0.56"
+windows-capture = "1.0.59"
 ```
 or run this command
 

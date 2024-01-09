@@ -1,6 +1,6 @@
 [package]
 name = "windows-capture"
-version = "1.0.56"
+version = "1.0.59"
 authors = ["NiiightmareXD"]
 edition = "2021"
 description = "Fastest Windows Screen Capture Library For Rust 🔥"
@@ -19,7 +19,6 @@ categories = [
 resolver = "2"
 
 [dependencies]
-log = "0.4.20"
 parking_lot = "0.12.1"
 rayon = "1.8.0"
 thiserror = "1.0.56"

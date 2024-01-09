@@ -5,7 +5,6 @@ use std::{
     ptr, slice,
 };
 
-use log::trace;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use windows::{
     Graphics::Imaging::{BitmapAlphaMode, BitmapEncoder, BitmapPixelFormat},
@@ -351,7 +350,6 @@ impl<'a> FrameBuffer<'a> {
 
         let frame_size = (self.width * self.height * 4) as usize;
         if self.buffer.capacity() < frame_size {
-            trace!("Resizing Preallocated Buffer");
             self.buffer.resize(frame_size, 0);
         }
 

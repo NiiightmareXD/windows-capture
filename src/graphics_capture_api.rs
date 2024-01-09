@@ -3,7 +3,6 @@ use std::sync::{
     Arc,
 };
 
-use log::{info, trace};
 use parking_lot::Mutex;
 use windows::{
     core::{ComInterface, IInspectable, HSTRING},
@@ -104,24 +103,20 @@ impl GraphicsCaptureApi {
         }
 
         // Create DirectX Devices
-        trace!("Creating DirectX Devices");
         let (d3d_device, d3d_device_context) = create_d3d_device()?;
         let direct3d_device = create_direct3d_device(&d3d_device)?;
 
         let pixel_format = DirectXPixelFormat(color_format as i32);
 
         // Create Frame Pool
-        trace!("Creating Frame Pool");
         let frame_pool =
             Direct3D11CaptureFramePool::Create(&direct3d_device, pixel_format, 1, item.Size()?)?;
         let frame_pool = Arc::new(frame_pool);
 
         // Create Capture Session
-        trace!("Creating Capture Session");
         let session = frame_pool.CreateCaptureSession(&item)?;
 
         // Preallocate Memory
-        trace!("Preallocating Memory");
         let mut buffer = vec![0u8; 3840 * 2160 * 4];
 
         // Indicates If The Capture Is Closed
@@ -199,13 +194,6 @@ impl GraphicsCaptureApi {
                     if frame_content_size.Width != last_size.Width
                         || frame_content_size.Height != last_size.Height
                     {
-                        info!(
-                            "Size Changed From {}x{} to {}x{} -> Recreating Device",
-                            last_size.Width,
-                            last_size.Height,
-                            frame_content_size.Width,
-                            frame_content_size.Height,
-                        );
                         let direct3d_device_recreate = &direct3d_device_recreate;
                         frame_pool_recreate
                             .Recreate(

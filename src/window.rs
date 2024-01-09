@@ -1,6 +1,5 @@
 use std::{ptr, string::FromUtf16Error};
 
-use log::warn;
 use windows::{
     core::HSTRING,
     Graphics::Capture::GraphicsCaptureItem,
@@ -102,7 +101,7 @@ impl Window {
         Ok(name)
     }
 
-    /// Get The Monitor That Has The Largest Area Of Intersection With The Window, None Means Windows Doesn't Intersect With Any Monitor
+    /// Get The Monitor That Has The Largest Area Of Intersection With The Window, None Means Window Doesn't Intersect With Any Monitor
     #[must_use]
     pub fn monitor(&self) -> Option<Monitor> {
         let window = self.window;
@@ -142,7 +141,6 @@ impl Window {
                 return false;
             }
         } else {
-            warn!("GetClientRect Failed");
             return false;
         }
 
