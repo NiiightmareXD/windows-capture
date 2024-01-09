@@ -10,9 +10,9 @@ pub enum Error {
 /// Kind Of Pixel Format For Frame To Have
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub enum ColorFormat {
-    Rgba8,
-    Bgra8,
-    NV12,
+    Rgba16F = 10,
+    Rgba8 = 28,
+    Bgra8 = 87,
 }
 
 /// Capture Settings, None Means Default

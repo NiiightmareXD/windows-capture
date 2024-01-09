@@ -19,7 +19,6 @@ categories = [
 resolver = "2"
 
 [dependencies]
-image = "0.24.7"
 log = "0.4.20"
 parking_lot = "0.12.1"
 rayon = "1.8.0"
@@ -39,6 +38,10 @@ windows = { version = "0.52.0", features = [
     "Graphics_DirectX_Direct3D11",
     "Foundation_Metadata",
     "Win32_Devices_Display",
+    "Storage",
+    "Graphics_Imaging",
+    "Storage_Streams",
+    "Foundation",
 ] }
 
 [package.metadata.docs.rs]

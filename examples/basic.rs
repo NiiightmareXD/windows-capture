@@ -1,6 +1,6 @@
 use windows_capture::{
     capture::WindowsCaptureHandler,
-    frame::Frame,
+    frame::{Frame, ImageFormat},
     graphics_capture_api::InternalCaptureControl,
     settings::{ColorFormat, Settings},
     window::Window,
@@ -10,10 +10,10 @@ use windows_capture::{
 struct Capture;
 
 impl WindowsCaptureHandler for Capture {
-    // To Get The Message From The Settings
+    // Any Value To Get From The Settings
     type Flags = String;
 
-    // To Redirect To CaptureControl Or Start Method
+    // To Redirect To `CaptureControl` Or Start Method
     type Error = Box<dyn std::error::Error + Send + Sync>;
 
     // Function That Will Be Called To Create The Struct The Flags Can Be Passed
@@ -33,7 +33,7 @@ impl WindowsCaptureHandler for Capture {
         println!("New Frame Arrived");
 
         // Save The Frame As An Image To The Specified Path
-        frame.save_as_image("image.png")?;
+        frame.save_as_image("image.png", ImageFormat::Png)?;
 
         // Gracefully Stop The Capture Thread
         capture_control.stop();
@@ -51,7 +51,7 @@ impl WindowsCaptureHandler for Capture {
 }
 
 fn main() {
-    // Checkout Docs For Other Capture Items
+    // Gets The Foreground Window, Checkout The Docs For Other Capture Items
     let foreground_window = Window::foreground().expect("No Active Window Found");
 
     let settings = Settings::new(
@@ -63,11 +63,11 @@ fn main() {
         None,
         // Kind Of Pixel Format For Frame To Have
         ColorFormat::Rgba8,
-        // Will Be Passed To The New Function
+        // Any Value To Pass To The New Function
         "It Works".to_string(),
     )
     .unwrap();
 
     // Every Error From `new`, `on_frame_arrived` and `on_closed` Will End Up Here
-    Capture::start(settings).unwrap();
+    Capture::start(settings).expect("Screen Capture Failed");
 }

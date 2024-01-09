@@ -10,7 +10,7 @@ use windows::{
             },
             Direct3D11::{
                 D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext,
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION,
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION,
             },
             Dxgi::IDXGIDevice,
         },
@@ -40,7 +40,7 @@ pub enum Error {
 }
 
 /// Create `ID3D11Device` An`ID3D11DeviceContext`xt
-pub fn create_d3d_device(bgra_support: bool) -> Result<(ID3D11Device, ID3D11DeviceContext), Error> {
+pub fn create_d3d_device() -> Result<(ID3D11Device, ID3D11DeviceContext), Error> {
     // Set Feature Flags
     let feature_flags = [
         D3D_FEATURE_LEVEL_11_1,
@@ -61,11 +61,7 @@ pub fn create_d3d_device(bgra_support: bool) -> Result<(ID3D11Device, ID3D11Devi
             None,
             D3D_DRIVER_TYPE_HARDWARE,
             None,
-            if bgra_support {
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT
-            } else {
-                D3D11_CREATE_DEVICE_FLAG(0)
-            },
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
             Some(&feature_flags),
             D3D11_SDK_VERSION,
             Some(&mut d3d_device),

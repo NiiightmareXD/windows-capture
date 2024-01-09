@@ -18,7 +18,8 @@ use windows::{
             Threading::{GetCurrentThreadId, GetThreadId},
             WinRT::{
                 CreateDispatcherQueueController, DispatcherQueueOptions, RoInitialize,
-                RoUninitialize, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, RO_INIT_SINGLETHREADED,
+                RoUninitialize, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, RO_INIT_MULTITHREADED,
+                RO_INIT_SINGLETHREADED,
             },
         },
         UI::WindowsAndMessaging::{
@@ -193,7 +194,7 @@ pub trait WindowsCaptureHandler: Sized {
         // Initialize WinRT
         trace!("Initializing WinRT");
         unsafe {
-            RoInitialize(RO_INIT_SINGLETHREADED)
+            RoInitialize(RO_INIT_MULTITHREADED)
                 .map_err(|_| WindowsCaptureError::FailedToInitWinRT)?;
         };
 

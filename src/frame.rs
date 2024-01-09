@@ -1,16 +1,22 @@
-use std::{path::Path, ptr, slice};
+use std::{
+    fs::{self},
+    io,
+    path::Path,
+    ptr, slice,
+};
 
-use image::{Rgb, RgbImage};
 use log::trace;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use windows::Win32::Graphics::{
-    Direct3D11::{
-        ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_BOX, D3D11_CPU_ACCESS_READ,
-        D3D11_CPU_ACCESS_WRITE, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ_WRITE,
-        D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
-    },
-    Dxgi::Common::{
-        DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_NV12, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC,
+use windows::{
+    Graphics::Imaging::{BitmapAlphaMode, BitmapEncoder, BitmapPixelFormat},
+    Storage::Streams::{Buffer, DataReader, InMemoryRandomAccessStream, InputStreamOptions},
+    Win32::Graphics::{
+        Direct3D11::{
+            ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_BOX, D3D11_CPU_ACCESS_READ,
+            D3D11_CPU_ACCESS_WRITE, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ_WRITE,
+            D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
+        },
+        Dxgi::Common::{DXGI_FORMAT, DXGI_SAMPLE_DESC},
     },
 };
 
@@ -21,10 +27,24 @@ use crate::settings::ColorFormat;
 pub enum Error {
     #[error("Invalid Box Size")]
     InvalidSize,
-    #[error(transparent)]
-    ImageSaveFailed(#[from] image::error::ImageError),
+    #[error("Invalid Path")]
+    InvalidPath,
+    #[error("This Color Format Is Not Supported For Saving As Image")]
+    UnsupportedFormat,
     #[error(transparent)]
     WindowsError(#[from] windows::core::Error),
+    #[error(transparent)]
+    IoError(#[from] io::Error),
+}
+
+#[derive(Eq, PartialEq, Clone, Copy, Debug)]
+pub enum ImageFormat {
+    Jpeg,
+    Png,
+    Gif,
+    Tiff,
+    Bmp,
+    JpegXr,
 }
 
 /// Frame Struct Used To Get The Frame Buffer
@@ -81,11 +101,7 @@ impl<'a> Frame<'a> {
             Height: self.height,
             MipLevels: 1,
             ArraySize: 1,
-            Format: match self.color_format {
-                ColorFormat::Rgba8 => DXGI_FORMAT_R8G8B8A8_UNORM,
-                ColorFormat::Bgra8 => DXGI_FORMAT_B8G8R8A8_UNORM,
-                ColorFormat::NV12 => DXGI_FORMAT_NV12,
-            },
+            Format: DXGI_FORMAT(self.color_format as i32),
             SampleDesc: DXGI_SAMPLE_DESC {
                 Count: 1,
                 Quality: 0,
@@ -164,11 +180,7 @@ impl<'a> Frame<'a> {
             Height: texture_height,
             MipLevels: 1,
             ArraySize: 1,
-            Format: if self.color_format == ColorFormat::Rgba8 {
-                DXGI_FORMAT_R8G8B8A8_UNORM
-            } else {
-                DXGI_FORMAT_B8G8R8A8_UNORM
-            },
+            Format: DXGI_FORMAT(self.color_format as i32),
             SampleDesc: DXGI_SAMPLE_DESC {
                 Count: 1,
                 Quality: 0,
@@ -246,10 +258,14 @@ impl<'a> Frame<'a> {
     }
 
     /// Save The Frame Buffer As An Image To The Specified Path
-    pub fn save_as_image<T: AsRef<Path>>(&mut self, path: T) -> Result<(), Error> {
+    pub fn save_as_image<T: AsRef<Path>>(
+        &mut self,
+        path: T,
+        format: ImageFormat,
+    ) -> Result<(), Error> {
         let frame_buffer = self.buffer()?;
 
-        frame_buffer.save_as_image(path)?;
+        frame_buffer.save_as_image(path, format)?;
 
         Ok(())
     }
@@ -358,38 +374,48 @@ impl<'a> FrameBuffer<'a> {
     }
 
     /// Save The Frame Buffer As An Image To The Specified Path (Only `ColorFormat::Rgba8` And `ColorFormat::Bgra8`)
-    pub fn save_as_image<T: AsRef<Path>>(&self, path: T) -> Result<(), Error> {
-        let mut rgb_image: RgbImage = RgbImage::new(self.width, self.height);
+    pub fn save_as_image<T: AsRef<Path>>(&self, path: T, format: ImageFormat) -> Result<(), Error> {
+        let encoder = match format {
+            ImageFormat::Jpeg => BitmapEncoder::JpegEncoderId()?,
+            ImageFormat::Png => BitmapEncoder::PngEncoderId()?,
+            ImageFormat::Gif => BitmapEncoder::GifEncoderId()?,
+            ImageFormat::Tiff => BitmapEncoder::TiffEncoderId()?,
+            ImageFormat::Bmp => BitmapEncoder::BmpEncoderId()?,
+            ImageFormat::JpegXr => BitmapEncoder::JpegXREncoderId()?,
+        };
 
-        if self.color_format == ColorFormat::Rgba8 {
-            for y in 0..self.height {
-                for x in 0..self.width {
-                    let first_index = (y * self.row_pitch + x * 4) as usize;
+        let stream = InMemoryRandomAccessStream::new()?;
+        let encoder = BitmapEncoder::CreateAsync(encoder, &stream)?.get()?;
 
-                    let r = self.raw_buffer[first_index];
-                    let g = self.raw_buffer[first_index + 1];
-                    let b = self.raw_buffer[first_index + 2];
+        let pixelformat = match self.color_format {
+            ColorFormat::Bgra8 => BitmapPixelFormat::Bgra8,
+            ColorFormat::Rgba8 => BitmapPixelFormat::Rgba8,
+            ColorFormat::Rgba16F => return Err(Error::UnsupportedFormat),
+        };
 
-                    rgb_image.put_pixel(x, y, Rgb([r, g, b]));
-                }
-            }
-        } else if self.color_format == ColorFormat::Bgra8 {
-            for y in 0..self.height {
-                for x in 0..self.width {
-                    let first_index = (y * self.row_pitch + x * 4) as usize;
+        encoder.SetPixelData(
+            pixelformat,
+            BitmapAlphaMode::Premultiplied,
+            self.width,
+            self.height,
+            1.0,
+            1.0,
+            self.raw_buffer,
+        )?;
 
-                    let b = self.raw_buffer[first_index];
-                    let g = self.raw_buffer[first_index + 1];
-                    let r = self.raw_buffer[first_index + 2];
+        encoder.FlushAsync()?.get()?;
 
-                    rgb_image.put_pixel(x, y, Rgb([r, g, b]));
-                }
-            }
-        } else {
-            unimplemented!()
-        }
+        let buffer = Buffer::Create(u32::try_from(stream.Size()?).unwrap())?;
+        stream
+            .ReadAsync(&buffer, buffer.Capacity()?, InputStreamOptions::None)?
+            .get()?;
 
-        rgb_image.save(path)?;
+        let data_reader = DataReader::FromBuffer(&buffer)?;
+        let length = data_reader.UnconsumedBufferLength()?;
+        let mut bytes = vec![0u8; length as usize];
+        data_reader.ReadBytes(&mut bytes).unwrap();
+
+        fs::write(path, bytes)?;
 
         Ok(())
     }

@@ -91,24 +91,24 @@ impl GraphicsCaptureApi {
         result: Arc<Mutex<Option<E>>>,
     ) -> Result<Self, Error> {
         // Check Support
-        if !ApiInformation::IsApiContractPresentByMajor(
-            &HSTRING::from("Windows.Foundation.UniversalApiContract"),
-            8,
-        )? {
+        if !Self::is_supported()? {
             return Err(Error::Unsupported);
+        }
+
+        if draw_border.is_some() && !Self::is_border_toggle_supported()? {
+            return Err(Error::BorderConfigUnsupported);
+        }
+
+        if capture_cursor.is_some() && !Self::is_cursor_toggle_supported()? {
+            return Err(Error::CursorConfigUnsupported);
         }
 
         // Create DirectX Devices
         trace!("Creating DirectX Devices");
-        let (d3d_device, d3d_device_context) =
-            create_d3d_device(color_format == ColorFormat::Bgra8)?;
+        let (d3d_device, d3d_device_context) = create_d3d_device()?;
         let direct3d_device = create_direct3d_device(&d3d_device)?;
 
-        let pixel_format = match color_format {
-            ColorFormat::Rgba8 => DirectXPixelFormat::R8G8B8A8UIntNormalized,
-            ColorFormat::Bgra8 => DirectXPixelFormat::B8G8R8A8UIntNormalized,
-            ColorFormat::NV12 => DirectXPixelFormat::NV12,
-        };
+        let pixel_format = DirectXPixelFormat(color_format as i32);
 
         // Create Frame Pool
         trace!("Creating Frame Pool");
@@ -348,7 +348,7 @@ impl GraphicsCaptureApi {
         Ok(ApiInformation::IsApiContractPresentByMajor(
             &HSTRING::from("Windows.Foundation.UniversalApiContract"),
             8,
-        )?)
+        )? && GraphicsCaptureSession::IsSupported()?)
     }
 
     /// Check If You Can Toggle The Cursor On Or Off
@@ -356,7 +356,7 @@ impl GraphicsCaptureApi {
         Ok(ApiInformation::IsPropertyPresent(
             &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
             &HSTRING::from("IsCursorCaptureEnabled"),
-        )?)
+        )? && Self::is_supported()?)
     }
 
     /// Check If You Can Toggle The Border On Or Off
@@ -364,7 +364,7 @@ impl GraphicsCaptureApi {
         Ok(ApiInformation::IsPropertyPresent(
             &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
             &HSTRING::from("IsBorderRequired"),
-        )?)
+        )? && Self::is_supported()?)
     }
 }
 
