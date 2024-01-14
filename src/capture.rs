@@ -44,6 +44,8 @@ pub enum CaptureControlError<E> {
     #[error("Failed To Post Thread Message")]
     FailedToPostThreadMessage,
     #[error(transparent)]
+    StoppedHandlerError(E),
+    #[error(transparent)]
     WindowsCaptureError(#[from] WindowsCaptureError<E>),
 }
 
@@ -409,7 +411,9 @@ pub trait WindowsCaptureHandler: Sized {
         capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error>;
 
-    /// Called When The Capture Item Closes Usually When The Window Closes,
+    /// Optional Handler Called When The Capture Item Closes Usually When The Window Closes,
     /// Capture Session Will End After This Function Ends
-    fn on_closed(&mut self) -> Result<(), Self::Error>;
+    fn on_closed(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
 }

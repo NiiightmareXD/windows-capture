@@ -262,7 +262,7 @@ impl<'a> Frame<'a> {
         path: T,
         format: ImageFormat,
     ) -> Result<(), Error> {
-        let frame_buffer = self.buffer()?;
+        let mut frame_buffer = self.buffer()?;
 
         frame_buffer.save_as_image(path, format)?;
 
@@ -372,7 +372,11 @@ impl<'a> FrameBuffer<'a> {
     }
 
     /// Save The Frame Buffer As An Image To The Specified Path (Only `ColorFormat::Rgba8` And `ColorFormat::Bgra8`)
-    pub fn save_as_image<T: AsRef<Path>>(&self, path: T, format: ImageFormat) -> Result<(), Error> {
+    pub fn save_as_image<T: AsRef<Path>>(
+        &'a mut self,
+        path: T,
+        format: ImageFormat,
+    ) -> Result<(), Error> {
         let encoder = match format {
             ImageFormat::Jpeg => BitmapEncoder::JpegEncoderId()?,
             ImageFormat::Png => BitmapEncoder::PngEncoderId()?,
@@ -398,7 +402,7 @@ impl<'a> FrameBuffer<'a> {
             self.height,
             1.0,
             1.0,
-            self.raw_buffer,
+            self.as_raw_nopadding_buffer()?,
         )?;
 
         encoder.FlushAsync()?.get()?;
