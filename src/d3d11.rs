@@ -1,5 +1,5 @@
 use windows::{
-    core::ComInterface,
+    core::Interface,
     Graphics::DirectX::Direct3D11::IDirect3DDevice,
     Win32::{
         Graphics::{
