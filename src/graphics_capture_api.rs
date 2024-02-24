@@ -5,7 +5,7 @@ use std::sync::{
 
 use parking_lot::Mutex;
 use windows::{
-    core::{ComInterface, IInspectable, HSTRING},
+    core::{IInspectable, Interface, HSTRING},
     Foundation::{EventRegistrationToken, Metadata::ApiInformation, TypedEventHandler},
     Graphics::{
         Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession},
