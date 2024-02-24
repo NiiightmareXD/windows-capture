@@ -6,7 +6,7 @@ use std::sync::{
 use parking_lot::Mutex;
 use windows::{
     core::{ComInterface, IInspectable, HSTRING},
-    Foundation::{Metadata::ApiInformation, TypedEventHandler},
+    Foundation::{Metadata::ApiInformation, TypedEventHandler, EventRegistrationToken},
     Graphics::{
         Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession},
         DirectX::{Direct3D11::IDirect3DDevice, DirectXPixelFormat},
@@ -65,7 +65,7 @@ impl InternalCaptureControl {
 
 /// Struct Used For Graphics Capture Api
 pub struct GraphicsCaptureApi {
-    _item: GraphicsCaptureItem,
+    item: GraphicsCaptureItem,
     _d3d_device: ID3D11Device,
     _direct3d_device: IDirect3DDevice,
     _d3d_device_context: ID3D11DeviceContext,
@@ -75,6 +75,8 @@ pub struct GraphicsCaptureApi {
     active: bool,
     capture_cursor: Option<bool>,
     draw_border: Option<bool>,
+    capture_closed_event_token: EventRegistrationToken,
+    frame_arrived_event_token: EventRegistrationToken
 }
 
 impl GraphicsCaptureApi {
@@ -123,7 +125,7 @@ impl GraphicsCaptureApi {
         let halt = Arc::new(AtomicBool::new(false));
 
         // Set Capture Session Closed Event
-        item.Closed(
+        let capture_closed_event_token = item.Closed(
             &TypedEventHandler::<GraphicsCaptureItem, IInspectable>::new({
                 // Init
                 let callback_closed = callback.clone();
@@ -154,7 +156,7 @@ impl GraphicsCaptureApi {
         )?;
 
         // Set Frame Pool Frame Arrived Event
-        frame_pool.FrameArrived(
+        let frame_arrived_event_token = frame_pool.FrameArrived(
             &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new({
                 // Init
                 let frame_pool_recreate = frame_pool.clone();
@@ -257,7 +259,7 @@ impl GraphicsCaptureApi {
         )?;
 
         Ok(Self {
-            _item: item,
+            item,
             _d3d_device: d3d_device,
             _direct3d_device: direct3d_device,
             _d3d_device_context: d3d_device_context,
@@ -267,6 +269,8 @@ impl GraphicsCaptureApi {
             active: false,
             capture_cursor,
             draw_border,
+            frame_arrived_event_token,
+            capture_closed_event_token
         })
     }
 
@@ -317,12 +321,15 @@ impl GraphicsCaptureApi {
     /// Stop Capture
     pub fn stop_capture(mut self) {
         if let Some(frame_pool) = self.frame_pool.take() {
+            frame_pool.RemoveFrameArrived(self.frame_arrived_event_token).expect("Failed to remove Frame Arrived event handler");
             frame_pool.Close().expect("Failed to Close Frame Pool");
         }
 
         if let Some(session) = self.session.take() {
             session.Close().expect("Failed to Close Capture Session");
         }
+
+        self.item.RemoveClosed(self.capture_closed_event_token).expect("Failed to remove Capture Session Closed event handler");
     }
 
     /// Get Halt Handle
@@ -360,11 +367,14 @@ impl GraphicsCaptureApi {
 impl Drop for GraphicsCaptureApi {
     fn drop(&mut self) {
         if let Some(frame_pool) = self.frame_pool.take() {
+            frame_pool.RemoveFrameArrived(self.frame_arrived_event_token).expect("Failed to remove Frame Arrived event handler");
             frame_pool.Close().expect("Failed to Close Frame Pool");
         }
 
         if let Some(session) = self.session.take() {
             session.Close().expect("Failed to Close Capture Session");
         }
+
+        self.item.RemoveClosed(self.capture_closed_event_token).expect("Failed to remove Capture Session Closed event handler");
     }
 }
