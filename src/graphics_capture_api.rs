@@ -22,109 +22,142 @@ use windows::{
 };
 
 use crate::{
-    capture::WindowsCaptureHandler,
+    capture::GraphicsCaptureApiHandler,
     d3d11::{self, create_d3d_device, create_direct3d_device, SendDirectX},
     frame::Frame,
-    settings::ColorFormat,
+    settings::{ColorFormat, CursorCaptuerSettings, DrawBorderSettings},
 };
 
-/// Used To Handle Graphics Capture Errors
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
 pub enum Error {
-    #[error("Graphics Capture API Is Not Supported")]
+    #[error("Graphics capture API is not supported")]
     Unsupported,
-    #[error("Graphics Capture API Toggling Cursor Capture Is Not Supported")]
+    #[error("Graphics capture API toggling cursor capture is not supported")]
     CursorConfigUnsupported,
-    #[error("Graphics Capture API Toggling Border Capture Is Not Supported")]
+    #[error("Graphics capture API toggling border capture is not supported")]
     BorderConfigUnsupported,
-    #[error("Already Started")]
+    #[error("Already started")]
     AlreadyStarted,
-    #[error(transparent)]
+    #[error("DirectX error: {0}")]
     DirectXError(#[from] d3d11::Error),
-    #[error(transparent)]
+    #[error("Windows API error: {0}")]
     WindowsError(#[from] windows::core::Error),
 }
 
-/// Struct Used To Control Capture Thread
+/// Used to control the capture session
 pub struct InternalCaptureControl {
     stop: Arc<AtomicBool>,
 }
 
 impl InternalCaptureControl {
-    /// Create A New Capture Control Struct
+    /// Create a new `InternalCaptureControl` struct.
+    ///
+    /// # Arguments
+    ///
+    /// * `stop` - An `Arc<AtomicBool>` indicating whether the capture should stop.
+    ///
+    /// # Returns
+    ///
+    /// A new instance of `InternalCaptureControl`.
     #[must_use]
     pub fn new(stop: Arc<AtomicBool>) -> Self {
         Self { stop }
     }
 
-    /// Gracefully Stop The Capture Thread
+    /// Gracefully stop the capture thread.
     pub fn stop(self) {
         self.stop.store(true, atomic::Ordering::Relaxed);
     }
 }
 
-/// Struct Used For Graphics Capture Api
+/// Represents the GraphicsCaptureApi struct.
 pub struct GraphicsCaptureApi {
+    /// The GraphicsCaptureItem associated with the GraphicsCaptureApi.
     item: GraphicsCaptureItem,
+    /// The ID3D11Device associated with the GraphicsCaptureApi.
     _d3d_device: ID3D11Device,
+    /// The IDirect3DDevice associated with the GraphicsCaptureApi.
     _direct3d_device: IDirect3DDevice,
+    /// The ID3D11DeviceContext associated with the GraphicsCaptureApi.
     _d3d_device_context: ID3D11DeviceContext,
+    /// The optional Arc<Direct3D11CaptureFramePool> associated with the GraphicsCaptureApi.
     frame_pool: Option<Arc<Direct3D11CaptureFramePool>>,
+    /// The optional GraphicsCaptureSession associated with the GraphicsCaptureApi.
     session: Option<GraphicsCaptureSession>,
+    /// The Arc<AtomicBool> used to halt the GraphicsCaptureApi.
     halt: Arc<AtomicBool>,
+    /// Indicates whether the GraphicsCaptureApi is active or not.
     active: bool,
-    capture_cursor: Option<bool>,
-    draw_border: Option<bool>,
+    /// The EventRegistrationToken associated with the capture closed event.
     capture_closed_event_token: EventRegistrationToken,
+    /// The EventRegistrationToken associated with the frame arrived event.
     frame_arrived_event_token: EventRegistrationToken,
 }
 
 impl GraphicsCaptureApi {
-    /// Create A New Graphics Capture Api Struct
-    #[allow(clippy::too_many_lines)]
-    pub fn new<T: WindowsCaptureHandler<Error = E> + Send + 'static, E: Send + Sync + 'static>(
+    /// Create a new Graphics Capture API struct.
+    ///
+    /// # Arguments
+    ///
+    /// * `item` - The graphics capture item to capture.
+    /// * `callback` - The callback handler for capturing frames.
+    /// * `capture_cursor` - Optional flag to capture the cursor.
+    /// * `draw_border` - Optional flag to draw a border around the captured region.
+    /// * `color_format` - The color format for the captured frames.
+    /// * `thread_id` - The ID of the thread where the capture is running.
+    /// * `result` - The result of the capture operation.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing the new `GraphicsCaptureApi` struct if successful, or an `Error` if an error occurred.
+    pub fn new<
+        T: GraphicsCaptureApiHandler<Error = E> + Send + 'static,
+        E: Send + Sync + 'static,
+    >(
         item: GraphicsCaptureItem,
         callback: Arc<Mutex<T>>,
-        capture_cursor: Option<bool>,
-        draw_border: Option<bool>,
+        cursor_capture: CursorCaptuerSettings,
+        draw_border: DrawBorderSettings,
         color_format: ColorFormat,
         thread_id: u32,
         result: Arc<Mutex<Option<E>>>,
     ) -> Result<Self, Error> {
-        // Check Support
+        // Check support
         if !Self::is_supported()? {
             return Err(Error::Unsupported);
         }
 
-        if draw_border.is_some() && !Self::is_border_toggle_supported()? {
-            return Err(Error::BorderConfigUnsupported);
-        }
-
-        if capture_cursor.is_some() && !Self::is_cursor_toggle_supported()? {
+        if cursor_capture != CursorCaptuerSettings::Default
+            && !Self::is_cursor_settings_supported()?
+        {
             return Err(Error::CursorConfigUnsupported);
         }
 
-        // Create DirectX Devices
+        if draw_border != DrawBorderSettings::Default && !Self::is_border_settings_supported()? {
+            return Err(Error::BorderConfigUnsupported);
+        }
+
+        // Create DirectX devices
         let (d3d_device, d3d_device_context) = create_d3d_device()?;
         let direct3d_device = create_direct3d_device(&d3d_device)?;
 
         let pixel_format = DirectXPixelFormat(color_format as i32);
 
-        // Create Frame Pool
+        // Create frame pool
         let frame_pool =
             Direct3D11CaptureFramePool::Create(&direct3d_device, pixel_format, 1, item.Size()?)?;
         let frame_pool = Arc::new(frame_pool);
 
-        // Create Capture Session
+        // Create capture session
         let session = frame_pool.CreateCaptureSession(&item)?;
 
-        // Preallocate Memory
+        // Preallocate memory
         let mut buffer = vec![0u8; 3840 * 2160 * 4];
 
-        // Indicates If The Capture Is Closed
+        // Indicates if the capture is closed
         let halt = Arc::new(AtomicBool::new(false));
 
-        // Set Capture Session Closed Event
+        // Set capture session closed event
         let capture_closed_event_token = item.Closed(&TypedEventHandler::<
             GraphicsCaptureItem,
             IInspectable,
@@ -137,12 +170,12 @@ impl GraphicsCaptureApi {
             move |_, _| {
                 halt_closed.store(true, atomic::Ordering::Relaxed);
 
-                // Notify The Struct That The Capture Session Is Closed
+                // Notify the struct that the capture session is closed
                 if let Err(e) = callback_closed.lock().on_closed() {
                     *result_closed.lock() = Some(e);
                 }
 
-                // To Stop Messge Loop
+                // To stop message loop
                 unsafe {
                     PostThreadMessageW(thread_id, WM_QUIT, WPARAM::default(), LPARAM::default())?;
                 };
@@ -151,7 +184,7 @@ impl GraphicsCaptureApi {
             }
         }))?;
 
-        // Set Frame Pool Frame Arrived Event
+        // Set frame pool frame arrived event
         let frame_arrived_event_token = frame_pool.FrameArrived(&TypedEventHandler::<
             Direct3D11CaptureFramePool,
             IInspectable,
@@ -168,55 +201,60 @@ impl GraphicsCaptureApi {
             let direct3d_device_recreate = SendDirectX::new(direct3d_device.clone());
 
             move |frame, _| {
-                // Return Early If The Capture Is Closed
+                // Return early if the capture is closed
                 if halt_frame_pool.load(atomic::Ordering::Relaxed) {
                     return Ok(());
                 }
 
-                // Get Frame
-                let frame = frame.as_ref().unwrap().TryGetNextFrame()?;
+                // Get frame
+                let frame = frame
+                    .as_ref()
+                    .expect("FrameArrived parameter was None this should never happen.")
+                    .TryGetNextFrame()?;
+                let timespan = frame.SystemRelativeTime()?;
 
-                // Get Frame Content Size
+                // Get frame content size
                 let frame_content_size = frame.ContentSize()?;
 
-                // Get Frame Surface
+                // Get frame surface
                 let frame_surface = frame.Surface()?;
 
-                // Convert Surface To Texture
-                let frame_surface = frame_surface.cast::<IDirect3DDxgiInterfaceAccess>()?;
-                let frame_surface = unsafe { frame_surface.GetInterface::<ID3D11Texture2D>()? };
+                // Convert surface to texture
+                let frame_dxgi_interface = frame_surface.cast::<IDirect3DDxgiInterfaceAccess>()?;
+                let frame_texture =
+                    unsafe { frame_dxgi_interface.GetInterface::<ID3D11Texture2D>()? };
 
-                // Get Texture Settings
+                // Get texture settings
                 let mut desc = D3D11_TEXTURE2D_DESC::default();
-                unsafe { frame_surface.GetDesc(&mut desc) }
+                unsafe { frame_texture.GetDesc(&mut desc) }
 
-                // Check If The Size Has Been Changed
+                // Check if the size has been changed
                 if frame_content_size.Width != last_size.Width
                     || frame_content_size.Height != last_size.Height
                 {
                     let direct3d_device_recreate = &direct3d_device_recreate;
-                    frame_pool_recreate
-                        .Recreate(
-                            &direct3d_device_recreate.0,
-                            pixel_format,
-                            1,
-                            frame_content_size,
-                        )
-                        .unwrap();
+                    frame_pool_recreate.Recreate(
+                        &direct3d_device_recreate.0,
+                        pixel_format,
+                        1,
+                        frame_content_size,
+                    )?;
 
                     last_size = frame_content_size;
 
                     return Ok(());
                 }
 
-                // Set Width & Height
+                // Set width & height
                 let texture_width = desc.Width;
                 let texture_height = desc.Height;
 
-                // Create A Frame
+                // Create a frame
                 let mut frame = Frame::new(
                     &d3d_device_frame_pool,
                     frame_surface,
+                    frame_texture,
+                    timespan,
                     &context,
                     &mut buffer,
                     texture_width,
@@ -224,11 +262,11 @@ impl GraphicsCaptureApi {
                     color_format,
                 );
 
-                // Init Internal Capture Control
+                // Init internal capture control
                 let stop = Arc::new(AtomicBool::new(false));
                 let internal_capture_control = InternalCaptureControl::new(stop.clone());
 
-                // Send The Frame To Trigger Struct
+                // Send the frame to the callback struct
                 let result = callback_frame_pool
                     .lock()
                     .on_frame_arrived(&mut frame, internal_capture_control);
@@ -240,7 +278,7 @@ impl GraphicsCaptureApi {
 
                     halt_frame_pool.store(true, atomic::Ordering::Relaxed);
 
-                    // To Stop Messge Loop
+                    // To stop the message loop
                     unsafe {
                         PostThreadMessageW(
                             thread_id,
@@ -255,6 +293,34 @@ impl GraphicsCaptureApi {
             }
         }))?;
 
+        if cursor_capture != CursorCaptuerSettings::Default {
+            if Self::is_cursor_settings_supported()? {
+                match cursor_capture {
+                    CursorCaptuerSettings::Default => (),
+                    CursorCaptuerSettings::WithCursor => session.SetIsCursorCaptureEnabled(true)?,
+                    CursorCaptuerSettings::WithoutCursor => {
+                        session.SetIsCursorCaptureEnabled(false)?
+                    }
+                };
+            } else {
+                return Err(Error::CursorConfigUnsupported);
+            }
+        }
+
+        if draw_border != DrawBorderSettings::Default {
+            if Self::is_border_settings_supported()? {
+                match draw_border {
+                    DrawBorderSettings::Default => (),
+                    DrawBorderSettings::WithBorder => {
+                        session.SetIsBorderRequired(true)?;
+                    }
+                    DrawBorderSettings::WithoutBorder => session.SetIsBorderRequired(false)?,
+                }
+            } else {
+                return Err(Error::BorderConfigUnsupported);
+            }
+        }
+
         Ok(Self {
             item,
             _d3d_device: d3d_device,
@@ -264,58 +330,28 @@ impl GraphicsCaptureApi {
             session: Some(session),
             halt,
             active: false,
-            capture_cursor,
-            draw_border,
             frame_arrived_event_token,
             capture_closed_event_token,
         })
     }
 
-    /// Start Capture
+    /// Start the capture.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the capture started successfully, or an `Error` if an error occurred.
     pub fn start_capture(&mut self) -> Result<(), Error> {
-        // Check If The Capture Is Already Installed
         if self.active {
             return Err(Error::AlreadyStarted);
         }
-
-        // Config
-        if self.capture_cursor.is_some() {
-            if ApiInformation::IsPropertyPresent(
-                &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
-                &HSTRING::from("IsCursorCaptureEnabled"),
-            )? {
-                self.session
-                    .as_ref()
-                    .unwrap()
-                    .SetIsCursorCaptureEnabled(self.capture_cursor.unwrap())?;
-            } else {
-                return Err(Error::CursorConfigUnsupported);
-            }
-        }
-
-        if self.draw_border.is_some() {
-            if ApiInformation::IsPropertyPresent(
-                &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
-                &HSTRING::from("IsBorderRequired"),
-            )? {
-                self.session
-                    .as_ref()
-                    .unwrap()
-                    .SetIsBorderRequired(self.draw_border.unwrap())?;
-            } else {
-                return Err(Error::BorderConfigUnsupported);
-            }
-        }
-
-        // Start Capture
-        self.session.as_ref().unwrap().StartCapture()?;
-
         self.active = true;
+
+        self.session.as_ref().unwrap().StartCapture()?;
 
         Ok(())
     }
 
-    /// Stop Capture
+    /// Stop the capture.
     pub fn stop_capture(mut self) {
         if let Some(frame_pool) = self.frame_pool.take() {
             frame_pool
@@ -334,13 +370,21 @@ impl GraphicsCaptureApi {
             .expect("Failed to remove Capture Session Closed event handler");
     }
 
-    /// Get Halt Handle
+    /// Get the halt handle.
+    ///
+    /// # Returns
+    ///
+    /// Returns an `Arc<AtomicBool>` representing the halt handle.
     #[must_use]
     pub fn halt_handle(&self) -> Arc<AtomicBool> {
         self.halt.clone()
     }
 
-    /// Check If Windows Graphics Capture Api Is Supported
+    /// Check if the Windows Graphics Capture API is supported.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(true)` if the API is supported, `Ok(false)` if the API is not supported, or an `Error` if an error occurred.
     pub fn is_supported() -> Result<bool, Error> {
         Ok(ApiInformation::IsApiContractPresentByMajor(
             &HSTRING::from("Windows.Foundation.UniversalApiContract"),
@@ -348,16 +392,24 @@ impl GraphicsCaptureApi {
         )? && GraphicsCaptureSession::IsSupported()?)
     }
 
-    /// Check If You Can Toggle The Cursor On Or Off
-    pub fn is_cursor_toggle_supported() -> Result<bool, Error> {
+    /// Check if you can change the cursor capture setting.
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if toggling the cursor capture is supported, `false` otherwise.
+    pub fn is_cursor_settings_supported() -> Result<bool, Error> {
         Ok(ApiInformation::IsPropertyPresent(
             &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
             &HSTRING::from("IsCursorCaptureEnabled"),
         )? && Self::is_supported()?)
     }
 
-    /// Check If You Can Toggle The Border On Or Off
-    pub fn is_border_toggle_supported() -> Result<bool, Error> {
+    /// Check if you can change the border capture setting.
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if toggling the border capture is supported, `false` otherwise.
+    pub fn is_border_settings_supported() -> Result<bool, Error> {
         Ok(ApiInformation::IsPropertyPresent(
             &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
             &HSTRING::from("IsBorderRequired"),
@@ -365,7 +417,6 @@ impl GraphicsCaptureApi {
     }
 }
 
-// Close Capture Session
 impl Drop for GraphicsCaptureApi {
     fn drop(&mut self) {
         if let Some(frame_pool) = self.frame_pool.take() {

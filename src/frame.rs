@@ -7,8 +7,8 @@ use std::{
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use windows::{
-    Graphics::Imaging::{BitmapAlphaMode, BitmapEncoder, BitmapPixelFormat},
-    Storage::Streams::{Buffer, DataReader, InMemoryRandomAccessStream, InputStreamOptions},
+    Foundation::TimeSpan,
+    Graphics::DirectX::Direct3D11::IDirect3DSurface,
     Win32::Graphics::{
         Direct3D11::{
             ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_BOX, D3D11_CPU_ACCESS_READ,
@@ -19,21 +19,23 @@ use windows::{
     },
 };
 
-use crate::settings::ColorFormat;
+use crate::{
+    encoder::{self, ImageEncoder},
+    settings::ColorFormat,
+};
 
-/// Used To Handle Frame Errors
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Invalid Box Size")]
+    #[error("Invalid box size")]
     InvalidSize,
-    #[error("Invalid Path")]
-    InvalidPath,
-    #[error("This Color Format Is Not Supported For Saving As Image")]
+    #[error("This color format is not supported for saving as image")]
     UnsupportedFormat,
-    #[error(transparent)]
-    WindowsError(#[from] windows::core::Error),
-    #[error(transparent)]
+    #[error("Failed to encode image buffer to image bytes with specified format: {0}")]
+    ImageEncoderError(#[from] encoder::ImageEncoderError),
+    #[error("IO error: {0}")]
     IoError(#[from] io::Error),
+    #[error("Windows API error: {0}")]
+    WindowsError(#[from] windows::core::Error),
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
@@ -46,10 +48,19 @@ pub enum ImageFormat {
     JpegXr,
 }
 
-/// Frame Struct Used To Get The Frame Buffer
+/// Represents a frame captured from a graphics capture item.
+///
+/// # Example
+/// ```no_run
+/// // Get frame from capture the session
+/// let mut buffer = frame.buffer()?;
+/// buffer.save_as_image("screenshot.png", ImageFormat::Png)?;
+/// ```
 pub struct Frame<'a> {
     d3d_device: &'a ID3D11Device,
-    frame_surface: ID3D11Texture2D,
+    frame_surface: IDirect3DSurface,
+    frame_texture: ID3D11Texture2D,
+    time: TimeSpan,
     context: &'a ID3D11DeviceContext,
     buffer: &'a mut Vec<u8>,
     width: u32,
@@ -58,11 +69,30 @@ pub struct Frame<'a> {
 }
 
 impl<'a> Frame<'a> {
-    /// Craete A New Frame
+    /// Create a new Frame.
+    ///
+    /// # Arguments
+    ///
+    /// * `d3d_device` - The ID3D11Device used for creating the frame.
+    /// * `frame_surface` - The IDirect3DSurface representing the frame surface.
+    /// * `frame_texture` - The ID3D11Texture2D representing the frame texture.
+    /// * `time` - The TimeSpan representing the frame time.
+    /// * `context` - The ID3D11DeviceContext used for copying the texture.
+    /// * `buffer` - The mutable Vec<u8> representing the frame buffer.
+    /// * `width` - The width of the frame.
+    /// * `height` - The height of the frame.
+    /// * `color_format` - The ColorFormat of the frame.
+    ///
+    /// # Returns
+    ///
+    /// A new Frame instance.
+    #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
         d3d_device: &'a ID3D11Device,
-        frame_surface: ID3D11Texture2D,
+        frame_surface: IDirect3DSurface,
+        frame_texture: ID3D11Texture2D,
+        time: TimeSpan,
         context: &'a ID3D11DeviceContext,
         buffer: &'a mut Vec<u8>,
         width: u32,
@@ -72,6 +102,8 @@ impl<'a> Frame<'a> {
         Self {
             d3d_device,
             frame_surface,
+            frame_texture,
+            time,
             context,
             buffer,
             width,
@@ -80,19 +112,55 @@ impl<'a> Frame<'a> {
         }
     }
 
-    /// Get The Frame Width
+    /// Get the width of the frame.
+    ///
+    /// # Returns
+    ///
+    /// The width of the frame.
     #[must_use]
     pub const fn width(&self) -> u32 {
         self.width
     }
 
-    /// Get The Frame Height
+    /// Get the height of the frame.
+    ///
+    /// # Returns
+    ///
+    /// The height of the frame.
     #[must_use]
     pub const fn height(&self) -> u32 {
         self.height
     }
 
-    /// Get The Frame Buffer
+    /// Get the time of the frame.
+    ///
+    /// # Returns
+    ///
+    /// The time of the frame.
+    #[must_use]
+    pub const fn timespan(&self) -> TimeSpan {
+        self.time
+    }
+
+    /// Get the raw surface of the frame.
+    ///
+    /// # Returns
+    ///
+    /// The IDirect3DSurface representing the raw surface of the frame.
+    ///
+    /// # Safety
+    ///
+    /// This method is unsafe because it returns a raw pointer to the IDirect3DSurface.
+    #[must_use]
+    pub unsafe fn as_raw_surface(&self) -> IDirect3DSurface {
+        self.frame_surface.clone()
+    }
+
+    /// Get the frame buffer.
+    ///
+    /// # Returns
+    ///
+    /// The FrameBuffer containing the frame data.
     pub fn buffer(&mut self) -> Result<FrameBuffer, Error> {
         // Texture Settings
         let texture_desc = D3D11_TEXTURE2D_DESC {
@@ -111,7 +179,7 @@ impl<'a> Frame<'a> {
             MiscFlags: 0,
         };
 
-        // Create A Texture That CPU Can Read
+        // Create a texture that CPU can read
         let mut texture = None;
         unsafe {
             self.d3d_device
@@ -119,12 +187,12 @@ impl<'a> Frame<'a> {
         };
         let texture = texture.unwrap();
 
-        // Copy The Real Texture To Copy Texture
+        // Copy the real texture to copy texture
         unsafe {
-            self.context.CopyResource(&texture, &self.frame_surface);
+            self.context.CopyResource(&texture, &self.frame_texture);
         };
 
-        // Map The Texture To Enable CPU Access
+        // Map the texture to enable CPU access
         let mut mapped_resource = D3D11_MAPPED_SUBRESOURCE::default();
         unsafe {
             self.context.Map(
@@ -136,7 +204,7 @@ impl<'a> Frame<'a> {
             )?;
         };
 
-        // Get The Mapped Resource Data Slice
+        // Get the mapped resource data slice
         let mapped_frame_data = unsafe {
             slice::from_raw_parts_mut(
                 mapped_resource.pData.cast(),
@@ -144,7 +212,7 @@ impl<'a> Frame<'a> {
             )
         };
 
-        // Create Frame Buffer From Slice
+        // Create frame buffer from slice
         let frame_buffer = FrameBuffer::new(
             mapped_frame_data,
             self.buffer,
@@ -158,7 +226,18 @@ impl<'a> Frame<'a> {
         Ok(frame_buffer)
     }
 
-    /// Get A Cropped Frame Buffer
+    /// Get a cropped frame buffer.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_width` - The starting width of the cropped frame.
+    /// * `start_height` - The starting height of the cropped frame.
+    /// * `end_width` - The ending width of the cropped frame.
+    /// * `end_height` - The ending height of the cropped frame.
+    ///
+    /// # Returns
+    ///
+    /// The FrameBuffer containing the cropped frame data.
     pub fn buffer_crop(
         &mut self,
         start_width: u32,
@@ -190,7 +269,7 @@ impl<'a> Frame<'a> {
             MiscFlags: 0,
         };
 
-        // Create A Texture That CPU Can Read
+        // Create a texture that CPU can read
         let mut texture = None;
         unsafe {
             self.d3d_device
@@ -208,7 +287,7 @@ impl<'a> Frame<'a> {
             back: 1,
         };
 
-        // Copy The Real Texture To Copy Texture
+        // Copy the real texture to copy texture
         unsafe {
             self.context.CopySubresourceRegion(
                 &texture,
@@ -216,13 +295,13 @@ impl<'a> Frame<'a> {
                 0,
                 0,
                 0,
-                &self.frame_surface,
+                &self.frame_texture,
                 0,
                 Some(&resource_box),
             );
         };
 
-        // Map The Texture To Enable CPU Access
+        // Map the texture to enable CPU access
         let mut mapped_resource = D3D11_MAPPED_SUBRESOURCE::default();
         unsafe {
             self.context.Map(
@@ -234,7 +313,7 @@ impl<'a> Frame<'a> {
             )?;
         };
 
-        // Get The Mapped Resource Data Slice
+        // Get the mapped resource data slice
         let mapped_frame_data = unsafe {
             slice::from_raw_parts_mut(
                 mapped_resource.pData.cast(),
@@ -242,7 +321,7 @@ impl<'a> Frame<'a> {
             )
         };
 
-        // Create Frame Buffer From Slice
+        // Create frame buffer from slice
         let frame_buffer = FrameBuffer::new(
             mapped_frame_data,
             self.buffer,
@@ -256,7 +335,16 @@ impl<'a> Frame<'a> {
         Ok(frame_buffer)
     }
 
-    /// Save The Frame Buffer As An Image To The Specified Path
+    /// Save the frame buffer as an image to the specified path.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path where the image will be saved.
+    /// * `format` - The ImageFormat of the saved image.
+    ///
+    /// # Returns
+    ///
+    /// An empty Result if successful, or an Error if there was an issue saving the image.
     pub fn save_as_image<T: AsRef<Path>>(
         &mut self,
         path: T,
@@ -270,8 +358,14 @@ impl<'a> Frame<'a> {
     }
 }
 
-/// Frame Buffer Struct Used To Get Raw Pixel Data
-#[allow(clippy::module_name_repetitions)]
+/// Represents a frame buffer containing pixel data.
+///
+/// # Example
+/// ```no_run
+/// // Get frame from the capture session
+/// let mut buffer = frame.buffer()?;
+/// buffer.save_as_image("screenshot.png", ImageFormat::Png)?;
+/// ```
 pub struct FrameBuffer<'a> {
     raw_buffer: &'a mut [u8],
     buffer: &'a mut Vec<u8>,
@@ -283,7 +377,21 @@ pub struct FrameBuffer<'a> {
 }
 
 impl<'a> FrameBuffer<'a> {
-    /// Create A New Frame Buffer
+    /// Create a new Frame Buffer.
+    ///
+    /// # Arguments
+    ///
+    /// * `raw_buffer` - A mutable reference to the raw pixel data buffer.
+    /// * `buffer` - A mutable reference to the buffer used for copying pixel data without padding.
+    /// * `width` - The width of the frame buffer.
+    /// * `height` - The height of the frame buffer.
+    /// * `row_pitch` - The row pitch of the frame buffer.
+    /// * `depth_pitch` - The depth pitch of the frame buffer.
+    /// * `color_format` - The color format of the frame buffer.
+    ///
+    /// # Returns
+    ///
+    /// A new `FrameBuffer` instance.
     #[must_use]
     pub fn new(
         raw_buffer: &'a mut [u8],
@@ -305,44 +413,47 @@ impl<'a> FrameBuffer<'a> {
         }
     }
 
-    /// Get The Frame Buffer Width
+    /// Get the width of the frame buffer.
     #[must_use]
     pub const fn width(&self) -> u32 {
         self.width
     }
 
-    /// Get The Frame Buffer Height
+    /// Get the height of the frame buffer.
     #[must_use]
     pub const fn height(&self) -> u32 {
         self.height
     }
 
-    /// Get The Frame Buffer Row Pitch
+    /// Get the row pitch of the frame buffer.
     #[must_use]
     pub const fn row_pitch(&self) -> u32 {
         self.row_pitch
     }
 
-    /// Get The Frame Buffer Depth Pitch
+    /// Get the depth pitch of the frame buffer.
     #[must_use]
     pub const fn depth_pitch(&self) -> u32 {
         self.depth_pitch
     }
 
-    /// Check If The Buffer Has Padding
+    /// Check if the buffer has padding.
     #[must_use]
     pub const fn has_padding(&self) -> bool {
         self.width * 4 != self.row_pitch
     }
 
-    /// Get The Raw Pixel Data Might Have Padding
+    /// Get the raw pixel data with possible padding.
     #[must_use]
     pub fn as_raw_buffer(&'a mut self) -> &'a mut [u8] {
         self.raw_buffer
     }
 
-    /// Get The Raw Pixel Data Without Padding
-    #[allow(clippy::type_complexity)]
+    /// Get the raw pixel data without padding.
+    ///
+    /// # Returns
+    ///
+    /// A mutable reference to the buffer containing pixel data without padding.
     pub fn as_raw_nopadding_buffer(&'a mut self) -> Result<&'a mut [u8], Error> {
         if !self.has_padding() {
             return Ok(self.raw_buffer);
@@ -371,51 +482,29 @@ impl<'a> FrameBuffer<'a> {
         Ok(&mut self.buffer[0..frame_size])
     }
 
-    /// Save The Frame Buffer As An Image To The Specified Path (Only `ColorFormat::Rgba8` And `ColorFormat::Bgra8`)
+    /// Save the frame buffer as an image to the specified path.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path where the image will be saved.
+    /// * `format` - The image format to use for saving.
+    ///
+    /// # Returns
+    ///
+    /// An `Ok` result if the image is successfully saved, or an `Err` result if there was an error.
     pub fn save_as_image<T: AsRef<Path>>(
         &'a mut self,
         path: T,
         format: ImageFormat,
     ) -> Result<(), Error> {
-        let encoder = match format {
-            ImageFormat::Jpeg => BitmapEncoder::JpegEncoderId()?,
-            ImageFormat::Png => BitmapEncoder::PngEncoderId()?,
-            ImageFormat::Gif => BitmapEncoder::GifEncoderId()?,
-            ImageFormat::Tiff => BitmapEncoder::TiffEncoderId()?,
-            ImageFormat::Bmp => BitmapEncoder::BmpEncoderId()?,
-            ImageFormat::JpegXr => BitmapEncoder::JpegXREncoderId()?,
-        };
+        let width = self.width;
+        let height = self.height;
 
-        let stream = InMemoryRandomAccessStream::new()?;
-        let encoder = BitmapEncoder::CreateAsync(encoder, &stream)?.get()?;
-
-        let pixelformat = match self.color_format {
-            ColorFormat::Bgra8 => BitmapPixelFormat::Bgra8,
-            ColorFormat::Rgba8 => BitmapPixelFormat::Rgba8,
-            ColorFormat::Rgba16F => return Err(Error::UnsupportedFormat),
-        };
-
-        encoder.SetPixelData(
-            pixelformat,
-            BitmapAlphaMode::Premultiplied,
-            self.width,
-            self.height,
-            1.0,
-            1.0,
+        let bytes = ImageEncoder::new(format, self.color_format).encode(
             self.as_raw_nopadding_buffer()?,
+            width,
+            height,
         )?;
-
-        encoder.FlushAsync()?.get()?;
-
-        let buffer = Buffer::Create(u32::try_from(stream.Size()?).unwrap())?;
-        stream
-            .ReadAsync(&buffer, buffer.Capacity()?, InputStreamOptions::None)?
-            .get()?;
-
-        let data_reader = DataReader::FromBuffer(&buffer)?;
-        let length = data_reader.UnconsumedBufferLength()?;
-        let mut bytes = vec![0u8; length as usize];
-        data_reader.ReadBytes(&mut bytes).unwrap();
 
         fs::write(path, bytes)?;
 

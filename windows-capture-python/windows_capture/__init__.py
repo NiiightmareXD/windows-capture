@@ -159,7 +159,7 @@ class WindowsCapture:
 
     def __init__(
         self,
-        capture_cursor: Optional[bool] = True,
+        cursor_capture: Optional[bool] = True,
         draw_border: Optional[bool] = None,
         monitor_index: Optional[int] = None,
         window_name: Optional[str] = None,
@@ -171,7 +171,7 @@ class WindowsCapture:
 
         Parameters
         ----------
-            capture_cursor : bool
+            cursor_capture : bool
                 Whether To Capture The Cursor
             draw_border : bool
                 Whether To draw The border
@@ -188,7 +188,7 @@ class WindowsCapture:
         self.capture = NativeWindowsCapture(
             self.on_frame_arrived,
             self.on_closed,
-            capture_cursor,
+            cursor_capture,
             draw_border,
             monitor_index,
             window_name,

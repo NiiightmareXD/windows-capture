@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "windows-capture"
-version = "1.0.61"
+version = "1.0.62"
 description = "Fastest Windows Screen Capture Library For Python 🔥"
 readme = "README.md"
 requires-python = ">=3.9"

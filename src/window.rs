@@ -19,27 +19,42 @@ use windows::{
 
 use crate::monitor::Monitor;
 
-/// Used To Handle Window Errors
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Failed To Get The Foreground Window")]
+    #[error("No active window found")]
     NoActiveWindow,
-    #[error("Failed To Find Window")]
-    NotFound,
-    #[error(transparent)]
+    #[error("Failed to find window with name: {0}")]
+    NotFound(String),
+    #[error("Failed to convert windows string from UTF-16: {0}")]
     FailedToConvertWindowsString(#[from] FromUtf16Error),
-    #[error(transparent)]
+    #[error("Windows API error: {0}")]
     WindowsError(#[from] windows::core::Error),
 }
 
-/// Represents A Windows
+/// Represents a window in the Windows operating system.
+///
+/// # Example
+/// ```no_run
+/// use windows_capture::window::Window;
+///
+/// fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let window = Window::foreground()?;
+///     println!("Foreground window title: {}", window.title()?);
+///
+///     Ok(())
+/// }
+/// ```
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub struct Window {
     window: HWND,
 }
 
 impl Window {
-    /// Get The Currently Active Window
+    /// Returns the foreground window.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error::NoActiveWindow` if there is no active window.
     pub fn foreground() -> Result<Self, Error> {
         let window = unsafe { GetForegroundWindow() };
 
@@ -50,19 +65,35 @@ impl Window {
         Ok(Self { window })
     }
 
-    /// Create From A Window Name
+    /// Creates a `Window` instance from a window name.
+    ///
+    /// # Arguments
+    ///
+    /// * `title` - The name of the window.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error::NotFound` if the window is not found.
     pub fn from_name(title: &str) -> Result<Self, Error> {
-        let title = HSTRING::from(title);
-        let window = unsafe { FindWindowW(None, &title) };
+        let hstring_title = HSTRING::from(title);
+        let window = unsafe { FindWindowW(None, &hstring_title) };
 
         if window.0 == 0 {
-            return Err(Error::NotFound);
+            return Err(Error::NotFound(String::from(title)));
         }
 
         Ok(Self { window })
     }
 
-    /// Create From A Window Name Substring
+    /// Creates a `Window` instance from a window name substring.
+    ///
+    /// # Arguments
+    ///
+    /// * `title` - The substring to search for in window names.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error::NotFound` if no window with a matching name substring is found.
     pub fn from_contains_name(title: &str) -> Result<Self, Error> {
         let windows = Self::enumerate()?;
 
@@ -74,10 +105,14 @@ impl Window {
             }
         }
 
-        target_window.map_or_else(|| Err(Error::NotFound), Ok)
+        target_window.map_or_else(|| Err(Error::NotFound(String::from(title))), Ok)
     }
 
-    /// Get Window Title
+    /// Returns the title of the window.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` if there is an error retrieving the window title.
     pub fn title(&self) -> Result<String, Error> {
         let len = unsafe { GetWindowTextLengthW(self.window) };
 
@@ -101,7 +136,9 @@ impl Window {
         Ok(name)
     }
 
-    /// Get The Monitor That Has The Largest Area Of Intersection With The Window, None Means Window Doesn't Intersect With Any Monitor
+    /// Returns the monitor that has the largest area of intersection with the window.
+    ///
+    /// Returns `None` if the window doesn't intersect with any monitor.
     #[must_use]
     pub fn monitor(&self) -> Option<Monitor> {
         let window = self.window;
@@ -115,7 +152,15 @@ impl Window {
         }
     }
 
-    /// Check If The Window Is A Valid Window
+    /// Checks if the window is a valid window.
+    ///
+    /// # Arguments
+    ///
+    /// * `window` - The window handle to check.
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if the window is valid, `false` otherwise.
     #[must_use]
     pub fn is_window_valid(window: HWND) -> bool {
         if !unsafe { IsWindowVisible(window).as_bool() } {
@@ -147,7 +192,11 @@ impl Window {
         true
     }
 
-    /// Get A List Of All Windows
+    /// Returns a list of all windows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` if there is an error enumerating the windows.
     pub fn enumerate() -> Result<Vec<Self>, Error> {
         let mut windows: Vec<Self> = Vec::new();
 
@@ -163,19 +212,23 @@ impl Window {
         Ok(windows)
     }
 
-    /// Create From A Raw HWND
+    /// Creates a `Window` instance from a raw HWND.
+    ///
+    /// # Arguments
+    ///
+    /// * `window` - The raw HWND.
     #[must_use]
     pub const fn from_raw_hwnd(window: HWND) -> Self {
         Self { window }
     }
 
-    /// Get The Raw HWND
+    /// Returns the raw HWND of the window.
     #[must_use]
     pub const fn as_raw_hwnd(&self) -> HWND {
         self.window
     }
 
-    // Callback Used For Enumerating All Windows
+    // Callback used for enumerating all windows.
     unsafe extern "system" fn enum_windows_callback(window: HWND, vec: LPARAM) -> BOOL {
         let windows = &mut *(vec.0 as *mut Vec<Self>);
 
@@ -187,12 +240,11 @@ impl Window {
     }
 }
 
-// Automatically Convert Window To GraphicsCaptureItem
+// Implements TryFrom For Window To Convert It To GraphicsCaptureItem
 impl TryFrom<Window> for GraphicsCaptureItem {
     type Error = Error;
 
     fn try_from(value: Window) -> Result<Self, Self::Error> {
-        // Get Capture Item From HWND
         let window = value.as_raw_hwnd();
 
         let interop = windows::core::factory::<Self, IGraphicsCaptureItemInterop>()?;

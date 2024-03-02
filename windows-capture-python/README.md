@@ -35,7 +35,7 @@ from windows_capture import WindowsCapture, Frame, InternalCaptureControl
 
 # Every Error From on_closed and on_frame_arrived Will End Up Here
 capture = WindowsCapture(
-    capture_cursor=None,
+    cursor_capture=None,
     draw_border=None,
     monitor_index=None,
     window_name=None,

@@ -33,35 +33,42 @@ use crate::{
     settings::Settings,
 };
 
-/// Used To Handle Capture Control Errors
 #[derive(thiserror::Error, Debug)]
-#[allow(clippy::module_name_repetitions)]
 pub enum CaptureControlError<E> {
-    #[error("Failed To Join Thread")]
+    #[error("Failed to join thread")]
     FailedToJoinThread,
-    #[error("Thread Handle Is Taken Out Of Struct")]
+    #[error("Thread handle is taken out of struct")]
     ThreadHandleIsTaken,
-    #[error("Failed To Post Thread Message")]
+    #[error("Failed to post thread message")]
     FailedToPostThreadMessage,
-    #[error(transparent)]
+    #[error("Stopped handler error: {0}")]
     StoppedHandlerError(E),
-    #[error(transparent)]
-    WindowsCaptureError(#[from] WindowsCaptureError<E>),
+    #[error("Windows capture error: {0}")]
+    GraphicsCaptureApiError(#[from] GraphicsCaptureApiError<E>),
 }
 
-/// Struct Used To Control Capture Thread
-#[allow(clippy::module_name_repetitions)]
-pub struct CaptureControl<T: WindowsCaptureHandler + Send + 'static + ?Sized, E> {
-    thread_handle: Option<JoinHandle<Result<(), WindowsCaptureError<E>>>>,
+/// Used to control the capture session
+pub struct CaptureControl<T: GraphicsCaptureApiHandler + Send + 'static + ?Sized, E> {
+    thread_handle: Option<JoinHandle<Result<(), GraphicsCaptureApiError<E>>>>,
     halt_handle: Arc<AtomicBool>,
     callback: Arc<Mutex<T>>,
 }
 
-impl<T: WindowsCaptureHandler + Send + 'static, E> CaptureControl<T, E> {
-    /// Create A New Capture Control Struct
+impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
+    /// Creates a new Capture Control struct.
+    ///
+    /// # Arguments
+    ///
+    /// * `thread_handle` - The join handle for the capture thread.
+    /// * `halt_handle` - The atomic boolean used to pause the capture thread.
+    /// * `callback` - The mutex-protected callback struct used to call struct methods directly.
+    ///
+    /// # Returns
+    ///
+    /// The newly created CaptureControl struct.
     #[must_use]
     pub fn new(
-        thread_handle: JoinHandle<Result<(), WindowsCaptureError<E>>>,
+        thread_handle: JoinHandle<Result<(), GraphicsCaptureApiError<E>>>,
         halt_handle: Arc<AtomicBool>,
         callback: Arc<Mutex<T>>,
     ) -> Self {
@@ -72,7 +79,11 @@ impl<T: WindowsCaptureHandler + Send + 'static, E> CaptureControl<T, E> {
         }
     }
 
-    /// Check To See If Capture Thread Is Finished
+    /// Checks to see if the capture thread is finished.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the capture thread is finished, `false` otherwise.
     #[must_use]
     pub fn is_finished(&self) -> bool {
         self.thread_handle
@@ -80,25 +91,41 @@ impl<T: WindowsCaptureHandler + Send + 'static, E> CaptureControl<T, E> {
             .map_or(true, std::thread::JoinHandle::is_finished)
     }
 
-    /// Get The Halt Handle Used To Pause The Capture Thread
+    /// Gets the join handle for the capture thread.
+    ///
+    /// # Returns
+    ///
+    /// The join handle for the capture thread.
     #[must_use]
-    pub fn into_thread_handle(self) -> JoinHandle<Result<(), WindowsCaptureError<E>>> {
+    pub fn into_thread_handle(self) -> JoinHandle<Result<(), GraphicsCaptureApiError<E>>> {
         self.thread_handle.unwrap()
     }
 
-    /// Get The Halt Handle Used To Pause The Capture Thread
+    /// Gets the halt handle used to pause the capture thread.
+    ///
+    /// # Returns
+    ///
+    /// The halt handle used to pause the capture thread.
     #[must_use]
     pub fn halt_handle(&self) -> Arc<AtomicBool> {
         self.halt_handle.clone()
     }
 
-    /// Get The Callback Struct Used To Call Struct Methods Directly
+    /// Gets the callback struct used to call struct methods directly.
+    ///
+    /// # Returns
+    ///
+    /// The callback struct used to call struct methods directly.
     #[must_use]
     pub fn callback(&self) -> Arc<Mutex<T>> {
         self.callback.clone()
     }
 
-    /// Wait Until The Capturing Thread Stops
+    /// Waits until the capturing thread stops.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the capturing thread stops successfully, an error otherwise.
     pub fn wait(mut self) -> Result<(), CaptureControlError<E>> {
         if let Some(thread_handle) = self.thread_handle.take() {
             match thread_handle.join() {
@@ -114,7 +141,11 @@ impl<T: WindowsCaptureHandler + Send + 'static, E> CaptureControl<T, E> {
         Ok(())
     }
 
-    /// Gracefully Stop The Capture Thread
+    /// Gracefully stops the capture thread.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the capture thread stops successfully, an error otherwise.
     pub fn stop(mut self) -> Result<(), CaptureControlError<E>> {
         self.halt_handle.store(true, atomic::Ordering::Relaxed);
 
@@ -154,9 +185,8 @@ impl<T: WindowsCaptureHandler + Send + 'static, E> CaptureControl<T, E> {
     }
 }
 
-/// Used To Handle Capture Control Errors
-#[derive(thiserror::Error, Debug)]
-pub enum WindowsCaptureError<E> {
+#[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
+pub enum GraphicsCaptureApiError<E> {
     #[error("Failed To Join Thread")]
     FailedToJoinThread,
     #[error("Failed To Initialize WinRT")]
@@ -168,34 +198,43 @@ pub enum WindowsCaptureError<E> {
     #[error("Failed To Set Dispatcher Queue Completed Handler")]
     FailedToSetDispatcherQueueCompletedHandler,
     #[error("Graphics Capture Error")]
-    GraphicsCaptureError(graphics_capture_api::Error),
+    GraphicsCaptureApiError(graphics_capture_api::Error),
     #[error("New Handler Error")]
     NewHandlerError(E),
     #[error("Frame Handler Error")]
     FrameHandlerError(E),
 }
 
-/// Event Handler Trait
-pub trait WindowsCaptureHandler: Sized {
-    /// To Get The Message From The Settings
+/// A trait representing a graphics capture handler.
+
+pub trait GraphicsCaptureApiHandler: Sized {
+    /// The type of flags used to get the values from the settings.
     type Flags;
 
-    /// To Redirect To `CaptureControl` Or `Start` Method
+    /// The type of error that can occur during capture, the error will be returned from `CaptureControl` and `start` functions.
     type Error: Send + Sync;
 
-    /// Starts The Capture And Takes Control Of The Current Thread
-    fn start(settings: Settings<Self::Flags>) -> Result<(), WindowsCaptureError<Self::Error>>
+    /// Starts the capture and takes control of the current thread.
+    ///
+    /// # Arguments
+    ///
+    /// * `settings` - The capture settings.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the capture was successful, otherwise returns an error of type `GraphicsCaptureApiError`.
+    fn start(settings: Settings<Self::Flags>) -> Result<(), GraphicsCaptureApiError<Self::Error>>
     where
         Self: Send + 'static,
-        <Self as WindowsCaptureHandler>::Flags: Send,
+        <Self as GraphicsCaptureApiHandler>::Flags: Send,
     {
         // Initialize WinRT
         unsafe {
             RoInitialize(RO_INIT_MULTITHREADED)
-                .map_err(|_| WindowsCaptureError::FailedToInitWinRT)?;
+                .map_err(|_| GraphicsCaptureApiError::FailedToInitWinRT)?;
         };
 
-        // Create A Dispatcher Queue For Current Thread
+        // Create a dispatcher queue for the current thread
         let options = DispatcherQueueOptions {
             dwSize: u32::try_from(mem::size_of::<DispatcherQueueOptions>()).unwrap(),
             threadType: DQTYPE_THREAD_CURRENT,
@@ -203,32 +242,32 @@ pub trait WindowsCaptureHandler: Sized {
         };
         let controller = unsafe {
             CreateDispatcherQueueController(options)
-                .map_err(|_| WindowsCaptureError::FailedToCreateDispatcherQueueController)?
+                .map_err(|_| GraphicsCaptureApiError::FailedToCreateDispatcherQueueController)?
         };
 
-        // Get Thread Id
+        // Get current thread ID
         let thread_id = unsafe { GetCurrentThreadId() };
 
-        // Start Capture
+        // Start capture
         let result = Arc::new(Mutex::new(None));
         let callback = Arc::new(Mutex::new(
-            Self::new(settings.flags).map_err(WindowsCaptureError::NewHandlerError)?,
+            Self::new(settings.flags).map_err(GraphicsCaptureApiError::NewHandlerError)?,
         ));
         let mut capture = GraphicsCaptureApi::new(
             settings.item,
             callback,
-            settings.capture_cursor,
+            settings.cursor_capture,
             settings.draw_border,
             settings.color_format,
             thread_id,
             result.clone(),
         )
-        .map_err(WindowsCaptureError::GraphicsCaptureError)?;
+        .map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?;
         capture
             .start_capture()
-            .map_err(WindowsCaptureError::GraphicsCaptureError)?;
+            .map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?;
 
-        // Message Loop
+        // Message loop
         let mut message = MSG::default();
         unsafe {
             while GetMessageW(&mut message, None, 0, 0).as_bool() {
@@ -237,10 +276,10 @@ pub trait WindowsCaptureHandler: Sized {
             }
         }
 
-        // Shutdown Dispatcher Queue
+        // Shutdown dispatcher queue
         let async_action = controller
             .ShutdownQueueAsync()
-            .map_err(|_| WindowsCaptureError::FailedToShutdownDispatcherQueue)?;
+            .map_err(|_| GraphicsCaptureApiError::FailedToShutdownDispatcherQueue)?;
         async_action
             .SetCompleted(&AsyncActionCompletedHandler::new(
                 move |_, _| -> Result<(), windows::core::Error> {
@@ -248,9 +287,9 @@ pub trait WindowsCaptureHandler: Sized {
                     Ok(())
                 },
             ))
-            .map_err(|_| WindowsCaptureError::FailedToSetDispatcherQueueCompletedHandler)?;
+            .map_err(|_| GraphicsCaptureApiError::FailedToSetDispatcherQueueCompletedHandler)?;
 
-        // Final Message Loop
+        // Final message loop
         let mut message = MSG::default();
         unsafe {
             while GetMessageW(&mut message, None, 0, 0).as_bool() {
@@ -259,81 +298,89 @@ pub trait WindowsCaptureHandler: Sized {
             }
         }
 
-        // Stop Capturing
+        // Stop capture
         capture.stop_capture();
 
         // Uninitialize WinRT
         unsafe { RoUninitialize() };
 
-        // Check Handler Result
+        // Check handler result
         if let Some(e) = result.lock().take() {
-            return Err(WindowsCaptureError::FrameHandlerError(e));
+            return Err(GraphicsCaptureApiError::FrameHandlerError(e));
         }
 
         Ok(())
     }
 
-    /// Starts The Capture Without Taking Control Of The Current Thread
-    #[allow(clippy::too_many_lines)]
+    /// Starts the capture without taking control of the current thread.
+    ///
+    /// # Arguments
+    ///
+    /// * `settings` - The capture settings.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(CaptureControl)` if the capture was successful, otherwise returns an error of type `GraphicsCaptureApiError`.
     fn start_free_threaded(
         settings: Settings<Self::Flags>,
-    ) -> Result<CaptureControl<Self, Self::Error>, WindowsCaptureError<Self::Error>>
+    ) -> Result<CaptureControl<Self, Self::Error>, GraphicsCaptureApiError<Self::Error>>
     where
         Self: Send + 'static,
-        <Self as WindowsCaptureHandler>::Flags: Send,
+        <Self as GraphicsCaptureApiHandler>::Flags: Send,
     {
         let (halt_sender, halt_receiver) = mpsc::channel::<Arc<AtomicBool>>();
         let (callback_sender, callback_receiver) = mpsc::channel::<Arc<Mutex<Self>>>();
 
-        let thread_handle =
-            thread::spawn(move || -> Result<(), WindowsCaptureError<Self::Error>> {
+        let thread_handle = thread::spawn(
+            move || -> Result<(), GraphicsCaptureApiError<Self::Error>> {
                 // Initialize WinRT
                 unsafe {
                     RoInitialize(RO_INIT_MULTITHREADED)
-                        .map_err(|_| WindowsCaptureError::FailedToInitWinRT)?;
+                        .map_err(|_| GraphicsCaptureApiError::FailedToInitWinRT)?;
                 };
 
-                // Create A Dispatcher Queue For Current Thread
+                // Create a dispatcher queue for the current thread
                 let options = DispatcherQueueOptions {
                     dwSize: u32::try_from(mem::size_of::<DispatcherQueueOptions>()).unwrap(),
                     threadType: DQTYPE_THREAD_CURRENT,
                     apartmentType: DQTAT_COM_NONE,
                 };
                 let controller = unsafe {
-                    CreateDispatcherQueueController(options)
-                        .map_err(|_| WindowsCaptureError::FailedToCreateDispatcherQueueController)?
+                    CreateDispatcherQueueController(options).map_err(|_| {
+                        GraphicsCaptureApiError::FailedToCreateDispatcherQueueController
+                    })?
                 };
 
-                // Debug Thread ID
+                // Get current thread ID
                 let thread_id = unsafe { GetCurrentThreadId() };
 
-                // Start Capture
+                // Start capture
                 let result = Arc::new(Mutex::new(None));
                 let callback = Arc::new(Mutex::new(
-                    Self::new(settings.flags).map_err(WindowsCaptureError::NewHandlerError)?,
+                    Self::new(settings.flags).map_err(GraphicsCaptureApiError::NewHandlerError)?,
                 ));
                 let mut capture = GraphicsCaptureApi::new(
                     settings.item,
                     callback.clone(),
-                    settings.capture_cursor,
+                    settings.cursor_capture,
                     settings.draw_border,
                     settings.color_format,
                     thread_id,
                     result.clone(),
                 )
-                .map_err(WindowsCaptureError::GraphicsCaptureError)?;
+                .map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?;
                 capture
                     .start_capture()
-                    .map_err(WindowsCaptureError::GraphicsCaptureError)?;
+                    .map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?;
 
-                // Send Halt Handle
+                // Send halt handle
                 let halt_handle = capture.halt_handle();
                 halt_sender.send(halt_handle).unwrap();
 
-                // Send Callback
+                // Send callback
                 callback_sender.send(callback).unwrap();
 
-                // Message Loop
+                // Message loop
                 let mut message = MSG::default();
                 unsafe {
                     while GetMessageW(&mut message, None, 0, 0).as_bool() {
@@ -342,10 +389,10 @@ pub trait WindowsCaptureHandler: Sized {
                     }
                 }
 
-                // Shutdown Dispatcher Queue
+                // Shutdown dispatcher queue
                 let async_action = controller
                     .ShutdownQueueAsync()
-                    .map_err(|_| WindowsCaptureError::FailedToShutdownDispatcherQueue)?;
+                    .map_err(|_| GraphicsCaptureApiError::FailedToShutdownDispatcherQueue)?;
 
                 async_action
                     .SetCompleted(&AsyncActionCompletedHandler::new(
@@ -354,9 +401,11 @@ pub trait WindowsCaptureHandler: Sized {
                             Ok(())
                         },
                     ))
-                    .map_err(|_| WindowsCaptureError::FailedToSetDispatcherQueueCompletedHandler)?;
+                    .map_err(|_| {
+                        GraphicsCaptureApiError::FailedToSetDispatcherQueueCompletedHandler
+                    })?;
 
-                // Final Message Loop
+                // Final message loop
                 let mut message = MSG::default();
                 unsafe {
                     while GetMessageW(&mut message, None, 0, 0).as_bool() {
@@ -365,25 +414,26 @@ pub trait WindowsCaptureHandler: Sized {
                     }
                 }
 
-                // Stop Capturing
+                // Stop capture
                 capture.stop_capture();
 
                 // Uninitialize WinRT
                 unsafe { RoUninitialize() };
 
-                // Check Handler Result
+                // Check handler result
                 if let Some(e) = result.lock().take() {
-                    return Err(WindowsCaptureError::FrameHandlerError(e));
+                    return Err(GraphicsCaptureApiError::FrameHandlerError(e));
                 }
 
                 Ok(())
-            });
+            },
+        );
 
         let Ok(halt_handle) = halt_receiver.recv() else {
             match thread_handle.join() {
                 Ok(result) => return Err(result.err().unwrap()),
                 Err(_) => {
-                    return Err(WindowsCaptureError::FailedToJoinThread);
+                    return Err(GraphicsCaptureApiError::FailedToJoinThread);
                 }
             }
         };
@@ -392,7 +442,7 @@ pub trait WindowsCaptureHandler: Sized {
             match thread_handle.join() {
                 Ok(result) => return Err(result.err().unwrap()),
                 Err(_) => {
-                    return Err(WindowsCaptureError::FailedToJoinThread);
+                    return Err(GraphicsCaptureApiError::FailedToJoinThread);
                 }
             }
         };
@@ -400,19 +450,38 @@ pub trait WindowsCaptureHandler: Sized {
         Ok(CaptureControl::new(thread_handle, halt_handle, callback))
     }
 
-    /// Function That Will Be Called To Create The Struct The Flags Can Be
-    /// Passed From Settings
+    /// Function that will be called to create the struct. The flags can be passed from settings.
+    ///
+    /// # Arguments
+    ///
+    /// * `flags` - The flags used to create the struct.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(Self)` if the struct creation was successful, otherwise returns an error of type `Self::Error`.
     fn new(flags: Self::Flags) -> Result<Self, Self::Error>;
 
-    /// Called Every Time A New Frame Is Available
+    /// Called every time a new frame is available.
+    ///
+    /// # Arguments
+    ///
+    /// * `frame` - A mutable reference to the captured frame.
+    /// * `capture_control` - The internal capture control.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the frame processing was successful, otherwise returns an error of type `Self::Error`.
     fn on_frame_arrived(
         &mut self,
         frame: &mut Frame,
         capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error>;
 
-    /// Optional Handler Called When The Capture Item Closes Usually When The Window Closes,
-    /// Capture Session Will End After This Function Ends
+    /// Optional handler called when the capture item (usually a window) closes.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the handler execution was successful, otherwise returns an error of type `Self::Error`.
     fn on_closed(&mut self) -> Result<(), Self::Error> {
         Ok(())
     }

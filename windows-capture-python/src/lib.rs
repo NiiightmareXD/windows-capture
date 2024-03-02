@@ -1,18 +1,17 @@
-#![warn(clippy::pedantic)]
 #![warn(clippy::nursery)]
 #![warn(clippy::cargo)]
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::missing_panics_doc)]
 #![allow(clippy::redundant_pub_crate)]
 
 use std::sync::Arc;
 
 use ::windows_capture::{
-    capture::{CaptureControl, CaptureControlError, WindowsCaptureError, WindowsCaptureHandler},
+    capture::{
+        CaptureControl, CaptureControlError, GraphicsCaptureApiError, GraphicsCaptureApiHandler,
+    },
     frame::{self, Frame},
     graphics_capture_api::InternalCaptureControl,
     monitor::Monitor,
-    settings::{ColorFormat, Settings},
+    settings::{ColorFormat, CursorCaptuerSettings, DrawBorderSettings, Settings},
     window::Window,
 };
 use pyo3::{exceptions::PyException, prelude::*, types::PyList};
@@ -59,8 +58,8 @@ impl NativeCaptureControl {
                 match capture_control.wait() {
                     Ok(()) => (),
                     Err(e) => {
-                        if let CaptureControlError::WindowsCaptureError(
-                            WindowsCaptureError::FrameHandlerError(
+                        if let CaptureControlError::GraphicsCaptureApiError(
+                            GraphicsCaptureApiError::FrameHandlerError(
                                 InnerNativeWindowsCaptureError::PythonError(ref e),
                             ),
                         ) = e
@@ -85,14 +84,14 @@ impl NativeCaptureControl {
 
     pub fn stop(&mut self, py: Python) -> PyResult<()> {
         // But Honestly WTF Is This? You Know How Much Time It Took Me To Debug This?
-        // Just Why? Who Decided This BS Threading Shit?
+        // Just Why? Who TF Decided This BS Threading Shit?
         py.allow_threads(|| {
             if let Some(capture_control) = self.capture_control.take() {
                 match capture_control.stop() {
                     Ok(()) => (),
                     Err(e) => {
-                        if let CaptureControlError::WindowsCaptureError(
-                            WindowsCaptureError::FrameHandlerError(
+                        if let CaptureControlError::GraphicsCaptureApiError(
+                            GraphicsCaptureApiError::FrameHandlerError(
                                 InnerNativeWindowsCaptureError::PythonError(ref e),
                             ),
                         ) = e
@@ -121,8 +120,8 @@ impl NativeCaptureControl {
 pub struct NativeWindowsCapture {
     on_frame_arrived_callback: Arc<PyObject>,
     on_closed: Arc<PyObject>,
-    capture_cursor: Option<bool>,
-    draw_border: Option<bool>,
+    cursor_capture: CursorCaptuerSettings,
+    draw_border: DrawBorderSettings,
     monitor_index: Option<usize>,
     window_name: Option<String>,
 }
@@ -133,7 +132,7 @@ impl NativeWindowsCapture {
     pub fn new(
         on_frame_arrived_callback: PyObject,
         on_closed: PyObject,
-        capture_cursor: Option<bool>,
+        cursor_capture: Option<bool>,
         draw_border: Option<bool>,
         mut monitor_index: Option<usize>,
         window_name: Option<String>,
@@ -148,10 +147,22 @@ impl NativeWindowsCapture {
             monitor_index = Some(1);
         }
 
+        let cursor_capture = match cursor_capture {
+            Some(true) => CursorCaptuerSettings::WithCursor,
+            Some(false) => CursorCaptuerSettings::WithoutCursor,
+            None => CursorCaptuerSettings::Default,
+        };
+
+        let draw_border = match draw_border {
+            Some(true) => DrawBorderSettings::WithBorder,
+            Some(false) => DrawBorderSettings::WithoutBorder,
+            None => DrawBorderSettings::Default,
+        };
+
         Ok(Self {
             on_frame_arrived_callback: Arc::new(on_frame_arrived_callback),
             on_closed: Arc::new(on_closed),
-            capture_cursor,
+            cursor_capture,
             draw_border,
             monitor_index,
             window_name,
@@ -172,8 +183,8 @@ impl NativeWindowsCapture {
 
             match Settings::new(
                 window,
-                self.capture_cursor,
-                self.draw_border,
+                self.cursor_capture.clone(),
+                self.draw_border.clone(),
                 ColorFormat::Bgra8,
                 (
                     self.on_frame_arrived_callback.clone(),
@@ -199,8 +210,8 @@ impl NativeWindowsCapture {
 
             match Settings::new(
                 monitor,
-                self.capture_cursor,
-                self.draw_border,
+                self.cursor_capture.clone(),
+                self.draw_border.clone(),
                 ColorFormat::Bgra8,
                 (
                     self.on_frame_arrived_callback.clone(),
@@ -219,7 +230,7 @@ impl NativeWindowsCapture {
         match InnerNativeWindowsCapture::start(settings) {
             Ok(()) => (),
             Err(e) => {
-                if let WindowsCaptureError::FrameHandlerError(
+                if let GraphicsCaptureApiError::FrameHandlerError(
                     InnerNativeWindowsCaptureError::PythonError(ref e),
                 ) = e
                 {
@@ -251,8 +262,8 @@ impl NativeWindowsCapture {
 
             match Settings::new(
                 window,
-                self.capture_cursor,
-                self.draw_border,
+                self.cursor_capture.clone(),
+                self.draw_border.clone(),
                 ColorFormat::Bgra8,
                 (
                     self.on_frame_arrived_callback.clone(),
@@ -278,8 +289,8 @@ impl NativeWindowsCapture {
 
             match Settings::new(
                 monitor,
-                self.capture_cursor,
-                self.draw_border,
+                self.cursor_capture.clone(),
+                self.draw_border.clone(),
                 ColorFormat::Bgra8,
                 (
                     self.on_frame_arrived_callback.clone(),
@@ -298,7 +309,7 @@ impl NativeWindowsCapture {
         let capture_control = match InnerNativeWindowsCapture::start_free_threaded(settings) {
             Ok(capture_control) => capture_control,
             Err(e) => {
-                if let WindowsCaptureError::FrameHandlerError(
+                if let GraphicsCaptureApiError::FrameHandlerError(
                     InnerNativeWindowsCaptureError::PythonError(ref e),
                 ) = e
                 {
@@ -332,7 +343,7 @@ pub enum InnerNativeWindowsCaptureError {
     FrameProcessError(frame::Error),
 }
 
-impl WindowsCaptureHandler for InnerNativeWindowsCapture {
+impl GraphicsCaptureApiHandler for InnerNativeWindowsCapture {
     type Flags = (Arc<PyObject>, Arc<PyObject>);
     type Error = InnerNativeWindowsCaptureError;
 

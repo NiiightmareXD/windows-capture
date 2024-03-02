@@ -22,37 +22,51 @@ use windows::{
     },
 };
 
-/// Used To Handle Monitor Errors
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Failed To Find Monitor")]
+    #[error("Failed to find monitor")]
     NotFound,
-    #[error("Failed To Find Monitor Name")]
+    #[error("Failed to find monitor name")]
     NameNotFound,
-    #[error("Monitor Index Is Lower Than One")]
+    #[error("Monitor index is lower than one")]
     IndexIsLowerThanOne,
-    #[error("Failed To Get Monitor Info")]
+    #[error("Failed to get monitor info")]
     FailedToGetMonitorInfo,
-    #[error("Failed To Get Monitor ettings")]
+    #[error("Failed to get monitor settings")]
     FailedToGetMonitorSettings,
-    #[error("Failed To Get Monitor Name")]
+    #[error("Failed to get monitor name")]
     FailedToGetMonitorName,
-    #[error(transparent)]
+    #[error("Failed to parse monitor index: {0}")]
     FailedToParseMonitorIndex(#[from] ParseIntError),
-    #[error(transparent)]
+    #[error("Failed to convert windows string: {0}")]
     FailedToConvertWindowsString(#[from] FromUtf16Error),
-    #[error(transparent)]
+    #[error("Windows API error: {0}")]
     WindowsError(#[from] windows::core::Error),
 }
 
 /// Represents A Monitor Device
+///
+/// # Example
+/// ```no_run
+/// use windows_capture::monitor::Monitor;
+///
+/// fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let monitor = Monitor::primary()?;
+///     println!("Primary Monitor: {}", monitor.name()?);
+///
+///     Ok(())
+/// }
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub struct Monitor {
     monitor: HMONITOR,
 }
 
 impl Monitor {
-    /// Get The Primary Monitor
+    /// Returns the primary monitor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error::NotFound` if there is no primary monitor.
     pub fn primary() -> Result<Self, Error> {
         let point = POINT { x: 0, y: 0 };
         let monitor = unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTONULL) };
@@ -64,7 +78,16 @@ impl Monitor {
         Ok(Self { monitor })
     }
 
-    /// Get The Monitor From It's Index
+    /// Returns the monitor at the specified index.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - The index of the monitor to retrieve. The index starts from 1.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error::IndexIsLowerThanOne` if the index is less than 1.
+    /// Returns an `Error::NotFound` if the monitor at the specified index is not found.
     pub fn from_index(index: usize) -> Result<Self, Error> {
         if index < 1 {
             return Err(Error::IndexIsLowerThanOne);
@@ -79,12 +102,21 @@ impl Monitor {
         Ok(monitor)
     }
 
+    /// Returns the index of the monitor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` if there is an error retrieving the monitor index.
     pub fn index(&self) -> Result<usize, Error> {
         let device_name = self.device_name()?;
         Ok(device_name.replace("\\\\.\\DISPLAY", "").parse()?)
     }
 
-    /// Get Monitor Name
+    /// Returns the name of the monitor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` if there is an error retrieving the monitor name.
     pub fn name(&self) -> Result<String, Error> {
         let mut monitor_info = MONITORINFOEXW {
             monitorInfo: MONITORINFO {
@@ -112,7 +144,8 @@ impl Monitor {
                 QDC_ONLY_ACTIVE_PATHS,
                 &mut number_of_paths,
                 &mut number_of_modes,
-            )?;
+            )
+            .ok()?;
         };
 
         let mut paths = vec![DISPLAYCONFIG_PATH_INFO::default(); number_of_paths as usize];
@@ -126,7 +159,8 @@ impl Monitor {
                 modes.as_mut_ptr(),
                 None,
             )
-        }?;
+        }
+        .ok()?;
 
         for path in paths {
             let mut source = DISPLAYCONFIG_SOURCE_DEVICE_NAME {
@@ -191,7 +225,11 @@ impl Monitor {
         Err(Error::NameNotFound)
     }
 
-    /// Get Monitor Device Name
+    /// Returns the device name of the monitor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` if there is an error retrieving the monitor device name.
     pub fn device_name(&self) -> Result<String, Error> {
         let mut monitor_info = MONITORINFOEXW {
             monitorInfo: MONITORINFO {
@@ -225,7 +263,11 @@ impl Monitor {
         Ok(device_name)
     }
 
-    /// Get Monitor Device String
+    /// Returns the device string of the monitor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` if there is an error retrieving the monitor device string.
     pub fn device_string(&self) -> Result<String, Error> {
         let mut monitor_info = MONITORINFOEXW {
             monitorInfo: MONITORINFO {
@@ -280,49 +322,11 @@ impl Monitor {
         Ok(device_string)
     }
 
-    /// Get Monitor Width
-    pub fn width(&self) -> Result<u32, Error> {
-        let mut device_mode = DEVMODEW {
-            dmSize: u16::try_from(mem::size_of::<DEVMODEW>()).unwrap(),
-            ..DEVMODEW::default()
-        };
-        let name = HSTRING::from(self.device_name()?);
-        if unsafe {
-            !EnumDisplaySettingsW(
-                PCWSTR(name.as_ptr()),
-                ENUM_CURRENT_SETTINGS,
-                &mut device_mode,
-            )
-            .as_bool()
-        } {
-            return Err(Error::FailedToGetMonitorSettings);
-        }
-
-        Ok(device_mode.dmPelsWidth)
-    }
-
-    /// Get Monitor Height
-    pub fn height(&self) -> Result<u32, Error> {
-        let mut device_mode = DEVMODEW {
-            dmSize: u16::try_from(mem::size_of::<DEVMODEW>()).unwrap(),
-            ..DEVMODEW::default()
-        };
-        let name = HSTRING::from(self.device_name()?);
-        if unsafe {
-            !EnumDisplaySettingsW(
-                PCWSTR(name.as_ptr()),
-                ENUM_CURRENT_SETTINGS,
-                &mut device_mode,
-            )
-            .as_bool()
-        } {
-            return Err(Error::FailedToGetMonitorSettings);
-        }
-
-        Ok(device_mode.dmPelsHeight)
-    }
-
-    /// Get Monitor Refresh Rate
+    /// Returns the refresh rate of the monitor in hertz.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` if there is an error retrieving the monitor refresh rate.
     pub fn refresh_rate(&self) -> Result<u32, Error> {
         let mut device_mode = DEVMODEW {
             dmSize: u16::try_from(mem::size_of::<DEVMODEW>()).unwrap(),
@@ -343,7 +347,61 @@ impl Monitor {
         Ok(device_mode.dmDisplayFrequency)
     }
 
-    /// Get A List Of All Monitors
+    /// Returns the width of the monitor in pixels.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` if there is an error retrieving the monitor width.
+    pub fn width(&self) -> Result<u32, Error> {
+        let mut device_mode = DEVMODEW {
+            dmSize: u16::try_from(mem::size_of::<DEVMODEW>()).unwrap(),
+            ..DEVMODEW::default()
+        };
+        let name = HSTRING::from(self.device_name()?);
+        if unsafe {
+            !EnumDisplaySettingsW(
+                PCWSTR(name.as_ptr()),
+                ENUM_CURRENT_SETTINGS,
+                &mut device_mode,
+            )
+            .as_bool()
+        } {
+            return Err(Error::FailedToGetMonitorSettings);
+        }
+
+        Ok(device_mode.dmPelsWidth)
+    }
+
+    /// Returns the height of the monitor in pixels.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` if there is an error retrieving the monitor height.
+    pub fn height(&self) -> Result<u32, Error> {
+        let mut device_mode = DEVMODEW {
+            dmSize: u16::try_from(mem::size_of::<DEVMODEW>()).unwrap(),
+            ..DEVMODEW::default()
+        };
+        let name = HSTRING::from(self.device_name()?);
+        if unsafe {
+            !EnumDisplaySettingsW(
+                PCWSTR(name.as_ptr()),
+                ENUM_CURRENT_SETTINGS,
+                &mut device_mode,
+            )
+            .as_bool()
+        } {
+            return Err(Error::FailedToGetMonitorSettings);
+        }
+
+        Ok(device_mode.dmPelsHeight)
+    }
+
+    /// Returns a list of all monitors.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` if there is an error enumerating the monitors.
     pub fn enumerate() -> Result<Vec<Self>, Error> {
         let mut monitors: Vec<Self> = Vec::new();
 
@@ -360,13 +418,17 @@ impl Monitor {
         Ok(monitors)
     }
 
-    /// Create From A Raw HMONITOR
+    /// Creates a `Monitor` instance from a raw HMONITOR.
+    ///
+    /// # Arguments
+    ///
+    /// * `monitor` - The raw HMONITOR.
     #[must_use]
     pub const fn from_raw_hmonitor(monitor: HMONITOR) -> Self {
         Self { monitor }
     }
 
-    /// Get The Raw HMONITOR
+    /// Returns the raw HMONITOR of the monitor.
     #[must_use]
     pub const fn as_raw_hmonitor(&self) -> HMONITOR {
         self.monitor
@@ -387,12 +449,11 @@ impl Monitor {
     }
 }
 
-// Automatically Convert Monitor To GraphicsCaptureItem
+// Implements TryFrom For Monitor To Convert It To GraphicsCaptureItem
 impl TryFrom<Monitor> for GraphicsCaptureItem {
     type Error = Error;
 
     fn try_from(value: Monitor) -> Result<Self, Self::Error> {
-        // Get Capture Item From HMONITOR
         let monitor = value.as_raw_hmonitor();
 
         let interop = windows::core::factory::<Self, IGraphicsCaptureItemInterop>()?;

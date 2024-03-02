@@ -1,13 +1,11 @@
 use windows::Graphics::Capture::GraphicsCaptureItem;
 
-/// Used To Handle Settings Errors
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
 pub enum Error {
-    #[error("Failed To Convert To GraphicsCaptureItem")]
+    #[error("Failed to convert item to GraphicsCaptureItem")]
     ItemConvertFailed,
 }
 
-/// Kind Of Pixel Format For Frame To Have
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub enum ColorFormat {
     Rgba16F = 10,
@@ -15,22 +13,59 @@ pub enum ColorFormat {
     Bgra8 = 87,
 }
 
-/// Capture Settings, None Means Default
+impl Default for ColorFormat {
+    fn default() -> Self {
+        Self::Rgba8
+    }
+}
+
 #[derive(Eq, PartialEq, Clone, Debug)]
+pub enum CursorCaptuerSettings {
+    Default,
+    WithCursor,
+    WithoutCursor,
+}
+
+#[derive(Eq, PartialEq, Clone, Debug)]
+pub enum DrawBorderSettings {
+    Default,
+    WithBorder,
+    WithoutBorder,
+}
+
+#[derive(Eq, PartialEq, Clone, Debug)]
+/// Represents the settings for screen capturing.
 pub struct Settings<Flags> {
+    /// The graphics capture item to capture.
     pub item: GraphicsCaptureItem,
-    pub capture_cursor: Option<bool>,
-    pub draw_border: Option<bool>,
+    /// Specifies whether to capture the cursor.
+    pub cursor_capture: CursorCaptuerSettings,
+    /// Specifies whether to draw a border around the captured region.
+    pub draw_border: DrawBorderSettings,
+    /// The color format for the captured graphics.
     pub color_format: ColorFormat,
+    /// Additional flags for capturing graphics.
     pub flags: Flags,
 }
 
 impl<Flags> Settings<Flags> {
     /// Create Capture Settings
+    ///
+    /// # Arguments
+    ///
+    /// * `item` - The graphics capture item.
+    /// * `capture_cursor` - Whether to capture the cursor or not.
+    /// * `draw_border` - Whether to draw a border around the captured region or not.
+    /// * `color_format` - The desired color format for the captured frame.
+    /// * `flags` - Additional flags for the capture settings that will be passed to user defined `new` function.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing the `Settings` if successful, or an `Error` if conversion to `GraphicsCaptureItem` fails.
     pub fn new<T: TryInto<GraphicsCaptureItem>>(
         item: T,
-        capture_cursor: Option<bool>,
-        draw_border: Option<bool>,
+        cursor_capture: CursorCaptuerSettings,
+        draw_border: DrawBorderSettings,
         color_format: ColorFormat,
         flags: Flags,
     ) -> Result<Self, Error> {
@@ -39,7 +74,7 @@ impl<Flags> Settings<Flags> {
                 Ok(item) => item,
                 Err(_) => return Err(Error::ItemConvertFailed),
             },
-            capture_cursor,
+            cursor_capture,
             draw_border,
             color_format,
             flags,

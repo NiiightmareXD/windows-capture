@@ -18,10 +18,27 @@ use windows::{
     },
 };
 
-/// To Share DirectX Structs Between Threads
+#[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
+pub enum Error {
+    #[error("Failed to create DirectX device with the recommended feature levels")]
+    FeatureLevelNotSatisfied,
+    #[error("Windows API Error: {0}")]
+    WindowsError(#[from] windows::core::Error),
+}
+
+/// Used To Send DirectX Device Across Threads
 pub struct SendDirectX<T>(pub T);
 
 impl<T> SendDirectX<T> {
+    /// Create A New `SendDirectX` Instance
+    ///
+    /// # Arguments
+    ///
+    /// * `device` - The DirectX Device
+    ///
+    /// # Returns
+    ///
+    /// Returns A New `SendDirectX` Instance
     pub const fn new(device: T) -> Self {
         Self(device)
     }
@@ -30,18 +47,12 @@ impl<T> SendDirectX<T> {
 #[allow(clippy::non_send_fields_in_send_ty)]
 unsafe impl<T> Send for SendDirectX<T> {}
 
-/// Used To Handle DirectX Errors
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("Failed To Create DirectX Device With The Recommended Feature Level")]
-    FeatureLevelNotSatisfied,
-    #[error(transparent)]
-    WindowsError(#[from] windows::core::Error),
-}
-
-/// Create `ID3D11Device` An`ID3D11DeviceContext`xt
+/// Create `ID3D11Device` and `ID3D11DeviceContext`
 pub fn create_d3d_device() -> Result<(ID3D11Device, ID3D11DeviceContext), Error> {
-    // Set Feature Flags
+    // Array of Direct3D feature levels.
+    // The feature levels are listed in descending order of capability.
+    // The highest feature level supported by the system is at index 0.
+    // The lowest feature level supported by the system is at the last index.
     let feature_flags = [
         D3D_FEATURE_LEVEL_11_1,
         D3D_FEATURE_LEVEL_11_0,
@@ -52,7 +63,6 @@ pub fn create_d3d_device() -> Result<(ID3D11Device, ID3D11DeviceContext), Error>
         D3D_FEATURE_LEVEL_9_1,
     ];
 
-    // Try To Build A Hardware Device
     let mut d3d_device = None;
     let mut feature_level = D3D_FEATURE_LEVEL::default();
     let mut d3d_device_context = None;
@@ -77,7 +87,7 @@ pub fn create_d3d_device() -> Result<(ID3D11Device, ID3D11DeviceContext), Error>
     Ok((d3d_device.unwrap(), d3d_device_context.unwrap()))
 }
 
-/// Create A `IDirect3DDevice` From `ID3D11Device`
+/// Create `IDirect3DDevice` From `ID3D11Device`
 pub fn create_direct3d_device(d3d_device: &ID3D11Device) -> Result<IDirect3DDevice, Error> {
     let dxgi_device: IDXGIDevice = d3d_device.cast()?;
     let inspectable = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi_device)? };

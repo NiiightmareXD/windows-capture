@@ -26,7 +26,7 @@ Add this library to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-windows-capture = "1.0.61"
+windows-capture = "1.0.62"
 ```
 or run this command
 
@@ -37,51 +37,88 @@ cargo add windows-capture
 ## Usage
 
 ```rust
-use windows_capture::{
-    capture::WindowsCaptureHandler,
-    frame::{Frame, ImageFormat},
-    graphics_capture_api::InternalCaptureControl,
-    settings::{ColorFormat, Settings},
-    window::Window,
+use std::{
+    io::{self, Write},
+    time::Instant,
 };
 
-// Struct To Implement The Trait For
-struct Capture;
+use windows_capture::{
+    capture::GraphicsCaptureApiHandler,
+    encoder::{VideoEncoder, VideoEncoderQuality, VideoEncoderType},
+    frame::Frame,
+    graphics_capture_api::InternalCaptureControl,
+    monitor::Monitor,
+    settings::{ColorFormat, CursorCaptuerSettings, DrawBorderSettings, Settings},
+};
 
-impl WindowsCaptureHandler for Capture {
-    // Any Value To Get From The Settings
+// This struct will be used to handle the capture events.
+struct Capture {
+    // The video encoder that will be used to encode the frames.
+    encoder: Option<VideoEncoder>,
+    // To measure the time the capture has been running
+    start: Instant,
+}
+
+impl GraphicsCaptureApiHandler for Capture {
+    // The type of flags used to get the values from the settings.
     type Flags = String;
 
-    // To Redirect To `CaptureControl` Or Start Method
+    // The type of error that can occur during capture, the error will be returned from `CaptureControl` and `start` functions.
     type Error = Box<dyn std::error::Error + Send + Sync>;
 
-    // Function That Will Be Called To Create The Struct The Flags Can Be Passed
-    // From `WindowsCaptureSettings`
+    // Function that will be called to create the struct. The flags can be passed from settings.
     fn new(message: Self::Flags) -> Result<Self, Self::Error> {
         println!("Got The Flag: {message}");
 
-        Ok(Self {})
+        let encoder = VideoEncoder::new(
+            VideoEncoderType::Mp4,
+            VideoEncoderQuality::HD1080p,
+            1920,
+            1080,
+            "video.mp4",
+        )?;
+
+        Ok(Self {
+            encoder: Some(encoder),
+            start: Instant::now(),
+        })
     }
 
-    // Called Every Time A New Frame Is Available
+    // Called every time a new frame is available.
     fn on_frame_arrived(
         &mut self,
         frame: &mut Frame,
         capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
-        println!("New Frame Arrived");
+        print!(
+            "\rRecording for: {} seconds",
+            self.start.elapsed().as_secs()
+        );
+        io::stdout().flush()?;
 
-        // Save The Frame As An Image To The Specified Path
-        frame.save_as_image("image.png", ImageFormat::Png)?;
+        // Send the frame to the video encoder
+        self.encoder.as_mut().unwrap().send_frame(frame)?;
 
-        // Gracefully Stop The Capture Thread
-        capture_control.stop();
+        // Note: The frame has other uses too for example you can save a single for to a file like this:
+        // frame.save_as_image("frame.png", ImageFormat::Png)?;
+        // Or get the raw data like this so you have full control:
+        // let data = frame.buffer()?;
+
+        // Stop the capture after 6 seconds
+        if self.start.elapsed().as_secs() >= 6 {
+            // Finish the encoder and save the video.
+            self.encoder.take().unwrap().finish()?;
+
+            capture_control.stop();
+
+            // Because there wasn't any new lines in previous prints
+            println!();
+        }
 
         Ok(())
     }
 
-    // Called When The Capture Item Closes Usually When The Window Closes, Capture
-    // Session Will End After This Function Ends
+    // Optional handler called when the capture item (usually a window) closes.
     fn on_closed(&mut self) -> Result<(), Self::Error> {
         println!("Capture Session Closed");
 
@@ -91,23 +128,24 @@ impl WindowsCaptureHandler for Capture {
 
 fn main() {
     // Gets The Foreground Window, Checkout The Docs For Other Capture Items
-    let foreground_window = Window::foreground().expect("No Active Window Found");
+    let primary_monitor = Monitor::primary().expect("There is no primary monitor");
 
     let settings = Settings::new(
         // Item To Captue
-        foreground_window,
+        primary_monitor,
         // Capture Cursor
-        Some(true),
+        CursorCaptuerSettings::Default,
         // Draw Borders (None Means Default Api Configuration)
-        None,
-        // Kind Of Pixel Format For Frame To Have
+        DrawBorderSettings::Default,
+        // The desired color format for the captured frame.
         ColorFormat::Rgba8,
-        // Any Value To Pass To The New Function
-        "It Works".to_string(),
+        // Additional flags for the capture settings that will be passed to user defined `new` function.
+        "Yea This Works".to_string(),
     )
     .unwrap();
 
-    // Every Error From `new`, `on_frame_arrived` and `on_closed` Will End Up Here
+    // Starts the capture and takes control of the current thread.
+    // The errors from handler trait will end up here
     Capture::start(settings).expect("Screen Capture Failed");
 }
 ```
