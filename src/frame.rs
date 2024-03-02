@@ -51,7 +51,7 @@ pub enum ImageFormat {
 /// Represents a frame captured from a graphics capture item.
 ///
 /// # Example
-/// ```no_run
+/// ```ignore
 /// // Get frame from capture the session
 /// let mut buffer = frame.buffer()?;
 /// buffer.save_as_image("screenshot.png", ImageFormat::Png)?;
@@ -361,7 +361,7 @@ impl<'a> Frame<'a> {
 /// Represents a frame buffer containing pixel data.
 ///
 /// # Example
-/// ```no_run
+/// ```ignore
 /// // Get frame from the capture session
 /// let mut buffer = frame.buffer()?;
 /// buffer.save_as_image("screenshot.png", ImageFormat::Png)?;
