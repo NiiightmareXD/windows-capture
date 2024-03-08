@@ -25,7 +25,7 @@ use crate::{
     capture::GraphicsCaptureApiHandler,
     d3d11::{self, create_d3d_device, create_direct3d_device, SendDirectX},
     frame::Frame,
-    settings::{ColorFormat, CursorCaptuerSettings, DrawBorderSettings},
+    settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings},
 };
 
 #[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
@@ -116,7 +116,7 @@ impl GraphicsCaptureApi {
     >(
         item: GraphicsCaptureItem,
         callback: Arc<Mutex<T>>,
-        cursor_capture: CursorCaptuerSettings,
+        cursor_capture: CursorCaptureSettings,
         draw_border: DrawBorderSettings,
         color_format: ColorFormat,
         thread_id: u32,
@@ -127,7 +127,7 @@ impl GraphicsCaptureApi {
             return Err(Error::Unsupported);
         }
 
-        if cursor_capture != CursorCaptuerSettings::Default
+        if cursor_capture != CursorCaptureSettings::Default
             && !Self::is_cursor_settings_supported()?
         {
             return Err(Error::CursorConfigUnsupported);
@@ -293,12 +293,12 @@ impl GraphicsCaptureApi {
             }
         }))?;
 
-        if cursor_capture != CursorCaptuerSettings::Default {
+        if cursor_capture != CursorCaptureSettings::Default {
             if Self::is_cursor_settings_supported()? {
                 match cursor_capture {
-                    CursorCaptuerSettings::Default => (),
-                    CursorCaptuerSettings::WithCursor => session.SetIsCursorCaptureEnabled(true)?,
-                    CursorCaptuerSettings::WithoutCursor => {
+                    CursorCaptureSettings::Default => (),
+                    CursorCaptureSettings::WithCursor => session.SetIsCursorCaptureEnabled(true)?,
+                    CursorCaptureSettings::WithoutCursor => {
                         session.SetIsCursorCaptureEnabled(false)?
                     }
                 };

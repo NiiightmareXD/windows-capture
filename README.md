@@ -26,7 +26,7 @@ Add this library to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-windows-capture = "1.0.65"
+windows-capture = "1.0.68"
 ```
 or run this command
 
@@ -48,7 +48,7 @@ use windows_capture::{
     frame::Frame,
     graphics_capture_api::InternalCaptureControl,
     monitor::Monitor,
-    settings::{ColorFormat, CursorCaptuerSettings, DrawBorderSettings, Settings},
+    settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings, Settings},
 };
 
 // This struct will be used to handle the capture events.
@@ -133,9 +133,9 @@ fn main() {
     let settings = Settings::new(
         // Item To Captue
         primary_monitor,
-        // Capture Cursor
-        CursorCaptuerSettings::Default,
-        // Draw Borders (None Means Default Api Configuration)
+        // Capture Cursor Settings
+        CursorCaptureSettings::Default,
+        // Draw Borders Settings
         DrawBorderSettings::Default,
         // The desired color format for the captured frame.
         ColorFormat::Rgba8,

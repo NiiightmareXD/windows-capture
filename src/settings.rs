@@ -20,7 +20,7 @@ impl Default for ColorFormat {
 }
 
 #[derive(Eq, PartialEq, Clone, Debug)]
-pub enum CursorCaptuerSettings {
+pub enum CursorCaptureSettings {
     Default,
     WithCursor,
     WithoutCursor,
@@ -39,7 +39,7 @@ pub struct Settings<Flags> {
     /// The graphics capture item to capture.
     pub item: GraphicsCaptureItem,
     /// Specifies whether to capture the cursor.
-    pub cursor_capture: CursorCaptuerSettings,
+    pub cursor_capture: CursorCaptureSettings,
     /// Specifies whether to draw a border around the captured region.
     pub draw_border: DrawBorderSettings,
     /// The color format for the captured graphics.
@@ -64,7 +64,7 @@ impl<Flags> Settings<Flags> {
     /// Returns a `Result` containing the `Settings` if successful, or an `Error` if conversion to `GraphicsCaptureItem` fails.
     pub fn new<T: TryInto<GraphicsCaptureItem>>(
         item: T,
-        cursor_capture: CursorCaptuerSettings,
+        cursor_capture: CursorCaptureSettings,
         draw_border: DrawBorderSettings,
         color_format: ColorFormat,
         flags: Flags,

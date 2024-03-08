@@ -11,7 +11,7 @@ use ::windows_capture::{
     frame::{self, Frame},
     graphics_capture_api::InternalCaptureControl,
     monitor::Monitor,
-    settings::{ColorFormat, CursorCaptuerSettings, DrawBorderSettings, Settings},
+    settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings, Settings},
     window::Window,
 };
 use pyo3::{exceptions::PyException, prelude::*, types::PyList};
@@ -120,7 +120,7 @@ impl NativeCaptureControl {
 pub struct NativeWindowsCapture {
     on_frame_arrived_callback: Arc<PyObject>,
     on_closed: Arc<PyObject>,
-    cursor_capture: CursorCaptuerSettings,
+    cursor_capture: CursorCaptureSettings,
     draw_border: DrawBorderSettings,
     monitor_index: Option<usize>,
     window_name: Option<String>,
@@ -148,9 +148,9 @@ impl NativeWindowsCapture {
         }
 
         let cursor_capture = match cursor_capture {
-            Some(true) => CursorCaptuerSettings::WithCursor,
-            Some(false) => CursorCaptuerSettings::WithoutCursor,
-            None => CursorCaptuerSettings::Default,
+            Some(true) => CursorCaptureSettings::WithCursor,
+            Some(false) => CursorCaptureSettings::WithoutCursor,
+            None => CursorCaptureSettings::Default,
         };
 
         let draw_border = match draw_border {

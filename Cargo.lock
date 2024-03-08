@@ -306,7 +306,7 @@ dependencies = [
 
 [[package]]
 name = "windows-capture"
-version = "1.0.65"
+version = "1.0.68"
 dependencies = [
  "parking_lot",
  "rayon",
@@ -316,7 +316,7 @@ dependencies = [
 
 [[package]]
 name = "windows-capture-python"
-version = "1.0.65"
+version = "1.0.68"
 dependencies = [
  "pyo3",
  "thiserror",
