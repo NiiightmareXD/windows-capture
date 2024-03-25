@@ -51,7 +51,7 @@ parking_lot = "0.12.1"
 rayon = "1.10.0"
 
 # Error handling
-thiserror = "1.0.57"
+thiserror = "1.0.58"
 
 [package.metadata.docs.rs]
 default-target = "x86_64-pc-windows-msvc"
