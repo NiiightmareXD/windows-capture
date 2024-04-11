@@ -1,6 +1,7 @@
 #![warn(clippy::nursery)]
 #![warn(clippy::cargo)]
 #![allow(clippy::redundant_pub_crate)]
+#![allow(clippy::multiple_crate_versions)] // Should update as soon as possible
 
 use std::sync::Arc;
 
@@ -18,7 +19,7 @@ use pyo3::{exceptions::PyException, prelude::*, types::PyList};
 
 /// Fastest Windows Screen Capture Library For Python 🔥.
 #[pymodule]
-fn windows_capture(_py: Python, m: &PyModule) -> PyResult<()> {
+fn windows_capture(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<NativeWindowsCapture>()?;
     m.add_class::<NativeCaptureControl>()?;
     Ok(())
@@ -370,7 +371,7 @@ impl GraphicsCaptureApiHandler for InnerNativeWindowsCapture {
             py.check_signals()
                 .map_err(InnerNativeWindowsCaptureError::PythonError)?;
 
-            let stop_list = PyList::new(py, [false]);
+            let stop_list = PyList::new_bound(py, [false]);
             self.on_frame_arrived_callback
                 .call1(
                     py,
@@ -379,13 +380,15 @@ impl GraphicsCaptureApiHandler for InnerNativeWindowsCapture {
                         buffer.len(),
                         width,
                         height,
-                        stop_list,
+                        stop_list.clone(),
                     ),
                 )
                 .map_err(InnerNativeWindowsCaptureError::PythonError)?;
 
-            if stop_list[0]
-                .is_true()
+            if stop_list
+                .get_item(0)
+                .map_err(InnerNativeWindowsCaptureError::PythonError)?
+                .is_truthy()
                 .map_err(InnerNativeWindowsCaptureError::PythonError)?
             {
                 capture_control.stop();

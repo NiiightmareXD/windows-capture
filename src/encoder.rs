@@ -29,7 +29,9 @@ use windows::{
     },
     Storage::{
         FileAccessMode, StorageFile,
-        Streams::{Buffer, DataReader, InMemoryRandomAccessStream, InputStreamOptions},
+        Streams::{
+            Buffer, DataReader, IRandomAccessStream, InMemoryRandomAccessStream, InputStreamOptions,
+        },
     },
 };
 
@@ -305,6 +307,151 @@ impl VideoEncoder {
             .PrepareMediaStreamSourceTranscodeAsync(
                 &media_stream_source,
                 &media_stream_output,
+                &media_encoding_profile,
+            )?
+            .get()?;
+
+        let error_notify = Arc::new(AtomicBool::new(false));
+        let transcode_thread = thread::spawn({
+            let error_notify = error_notify.clone();
+
+            move || -> Result<(), VideoEncoderError> {
+                let result = transcode.TranscodeAsync();
+
+                if result.is_err() {
+                    error_notify.store(true, atomic::Ordering::Relaxed);
+                }
+
+                result?.get()?;
+
+                drop(media_transcoder);
+
+                Ok(())
+            }
+        });
+
+        Ok(Self {
+            first_timespan: None,
+            frame_sender,
+            sample_requested,
+            media_stream_source,
+            starting,
+            transcode_thread: Some(transcode_thread),
+            frame_notify,
+            error_notify,
+        })
+    }
+
+    /// Creates a new `VideoEncoder` instance with the specified parameters.
+    ///
+    /// # Arguments
+    ///
+    /// * `encoder_type` - The type of video encoder to use.
+    /// * `encoder_quality` - The quality of the video encoder.
+    /// * `width` - The width of the video frames.
+    /// * `height` - The height of the video frames.
+    /// * `stream` - The stream where the encoded video will be saved.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing the `VideoEncoder` instance if successful, or a
+    /// `VideoEncoderError` if an error occurs.
+    pub fn new_from_stream<P: AsRef<Path>>(
+        encoder_type: VideoEncoderType,
+        encoder_quality: VideoEncoderQuality,
+        width: u32,
+        height: u32,
+        stream: IRandomAccessStream,
+    ) -> Result<Self, VideoEncoderError> {
+        let media_encoding_profile = match encoder_type {
+            VideoEncoderType::Avi => {
+                MediaEncodingProfile::CreateAvi(VideoEncodingQuality(encoder_quality as i32))?
+            }
+            VideoEncoderType::Hevc => {
+                MediaEncodingProfile::CreateHevc(VideoEncodingQuality(encoder_quality as i32))?
+            }
+            VideoEncoderType::Mp4 => {
+                MediaEncodingProfile::CreateMp4(VideoEncodingQuality(encoder_quality as i32))?
+            }
+            VideoEncoderType::Wmv => {
+                MediaEncodingProfile::CreateWmv(VideoEncodingQuality(encoder_quality as i32))?
+            }
+        };
+
+        let video_encoding_properties = VideoEncodingProperties::CreateUncompressed(
+            &MediaEncodingSubtypes::Bgra8()?,
+            width,
+            height,
+        )?;
+
+        let video_stream_descriptor = VideoStreamDescriptor::Create(&video_encoding_properties)?;
+
+        let media_stream_source =
+            MediaStreamSource::CreateFromDescriptor(&video_stream_descriptor)?;
+        media_stream_source.SetBufferTime(TimeSpan::default())?;
+
+        let (frame_sender, frame_receiver) =
+            mpsc::channel::<Option<(SendDirectX<IDirect3DSurface>, TimeSpan)>>();
+
+        let starting = media_stream_source.Starting(&TypedEventHandler::<
+            MediaStreamSource,
+            MediaStreamSourceStartingEventArgs,
+        >::new(move |_, stream_start| {
+            let stream_start = stream_start
+                .as_ref()
+                .expect("MediaStreamSource Starting parameter was None This Should Not Happen.");
+
+            stream_start
+                .Request()?
+                .SetActualStartPosition(TimeSpan { Duration: 0 })?;
+            Ok(())
+        }))?;
+
+        let frame_notify = Arc::new((Mutex::new(false), Condvar::new()));
+
+        let sample_requested = media_stream_source.SampleRequested(&TypedEventHandler::<
+            MediaStreamSource,
+            MediaStreamSourceSampleRequestedEventArgs,
+        >::new({
+            let frame_receiver = frame_receiver;
+            let frame_notify = frame_notify.clone();
+
+            move |_, sample_requested| {
+                let sample_requested = sample_requested.as_ref().expect(
+                    "MediaStreamSource SampleRequested parameter was None This Should Not Happen.",
+                );
+
+                let frame = match frame_receiver.recv() {
+                    Ok(frame) => frame,
+                    Err(e) => panic!("Failed to receive frame from frame sender: {e}"),
+                };
+
+                match frame {
+                    Some((surface, timespan)) => {
+                        let sample =
+                            MediaStreamSample::CreateFromDirect3D11Surface(&surface.0, timespan)?;
+                        sample_requested.Request()?.SetSample(&sample)?;
+                    }
+                    None => {
+                        sample_requested.Request()?.SetSample(None)?;
+                    }
+                }
+
+                let (lock, cvar) = &*frame_notify;
+                *lock.lock() = true;
+                cvar.notify_one();
+
+                Ok(())
+            }
+        }))?;
+
+        let media_transcoder = MediaTranscoder::new()?;
+        media_transcoder.SetHardwareAccelerationEnabled(true)?;
+
+        let transcode = media_transcoder
+            .PrepareMediaStreamSourceTranscodeAsync(
+                &media_stream_source,
+                &stream,
                 &media_encoding_profile,
             )?
             .get()?;
