@@ -191,8 +191,6 @@ pub enum GraphicsCaptureApiError<E> {
     FailedToJoinThread,
     #[error("Failed to initialize WinRT")]
     FailedToInitWinRT,
-    #[error("Failed to translate message")]
-    FailedToTranslateMessage,
     #[error("Failed to create dispatcher queue controller")]
     FailedToCreateDispatcherQueueController,
     #[error("Failed to shutdown dispatcher queue")]
@@ -273,9 +271,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
         let mut message = MSG::default();
         unsafe {
             while GetMessageW(&mut message, None, 0, 0).as_bool() {
-                TranslateMessage(&message)
-                    .ok()
-                    .map_err(|_| GraphicsCaptureApiError::FailedToTranslateMessage)?;
+                let _ = TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
         }
@@ -297,9 +293,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
         let mut message = MSG::default();
         unsafe {
             while GetMessageW(&mut message, None, 0, 0).as_bool() {
-                TranslateMessage(&message)
-                    .ok()
-                    .map_err(|_| GraphicsCaptureApiError::FailedToTranslateMessage)?;
+                let _ = TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
         }
@@ -390,9 +384,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
                 let mut message = MSG::default();
                 unsafe {
                     while GetMessageW(&mut message, None, 0, 0).as_bool() {
-                        TranslateMessage(&message)
-                            .ok()
-                            .map_err(|_| GraphicsCaptureApiError::FailedToTranslateMessage)?;
+                        let _ = TranslateMessage(&message);
                         DispatchMessageW(&message);
                     }
                 }
@@ -417,9 +409,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
                 let mut message = MSG::default();
                 unsafe {
                     while GetMessageW(&mut message, None, 0, 0).as_bool() {
-                        TranslateMessage(&message)
-                            .ok()
-                            .map_err(|_| GraphicsCaptureApiError::FailedToTranslateMessage)?;
+                        let _ = TranslateMessage(&message);
                         DispatchMessageW(&message);
                     }
                 }

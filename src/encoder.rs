@@ -178,7 +178,7 @@ pub enum VideoEncoderQuality {
 /// The `VideoEncoderSource` struct represents all the types that can be send to the encoder.
 pub enum VideoEncoderSource {
     DirectX(SendDirectX<IDirect3DSurface>),
-    Buffer((SendDirectX<*mut u8>, usize)),
+    Buffer((SendDirectX<*const u8>, usize)),
 }
 
 /// The `VideoEncoder` struct represents a video encoder that can be used to encode video frames and save them to a specified file path.
@@ -542,8 +542,7 @@ impl VideoEncoder {
                 TimeSpan { Duration: 0 }
             }
         };
-
-        let surface = SendDirectX(unsafe { frame.as_raw_surface() });
+        let surface = SendDirectX::new(unsafe { frame.as_raw_surface() });
 
         self.frame_sender
             .send(Some((VideoEncoderSource::DirectX(surface), timespan)))?;
@@ -567,46 +566,46 @@ impl VideoEncoder {
         Ok(())
     }
 
-    // /// Sends a video frame to the video encoder for encoding.
-    // ///
-    // /// # Arguments
-    // ///
-    // /// * `frame` - A mutable reference to the `Frame` to be encoded.
-    // ///
-    // /// # Returns
-    // ///
-    // /// Returns `Ok(())` if the frame is successfully sent for encoding, or a `VideoEncoderError`
-    // /// if an error occurs.
-    // pub fn send_frame_buffer(
-    //     &mut self,
-    //     frame: &mut Frame,
-    //     timespan: i64,
-    // ) -> Result<(), VideoEncoderError> {
-    //     let timespan = TimeSpan { Duration: timespan };
+    /// Sends a video frame to the video encoder for encoding.
+    ///
+    /// # Arguments
+    ///
+    /// * `buffer` - A reference to the byte slice to be encoded Windows API expect this to be Bgra and bottom-top.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the frame is successfully sent for encoding, or a `VideoEncoderError`
+    /// if an error occurs.
+    pub fn send_frame_buffer(
+        &mut self,
+        buffer: &[u8],
+        timespan: i64,
+    ) -> Result<(), VideoEncoderError> {
+        let timespan = TimeSpan { Duration: timespan };
 
-    //     let surface = SendDirectX(unsafe { frame.as_raw_surface() });
+        self.frame_sender.send(Some((
+            VideoEncoderSource::Buffer((SendDirectX::new(buffer.as_ptr()), buffer.len())),
+            timespan,
+        )))?;
 
-    //     self.frame_sender
-    //         .send(Some((VideoEncoderSource::DirectX(surface), timespan)))?;
+        let (lock, cvar) = &*self.frame_notify;
+        let mut processed = lock.lock();
+        if !*processed {
+            cvar.wait(&mut processed);
+        }
+        *processed = false;
+        drop(processed);
 
-    //     let (lock, cvar) = &*self.frame_notify;
-    //     let mut processed = lock.lock();
-    //     if !*processed {
-    //         cvar.wait(&mut processed);
-    //     }
-    //     *processed = false;
-    //     drop(processed);
+        if self.error_notify.load(atomic::Ordering::Relaxed) {
+            if let Some(transcode_thread) = self.transcode_thread.take() {
+                transcode_thread
+                    .join()
+                    .expect("Failed to join transcode thread")?;
+            }
+        }
 
-    //     if self.error_notify.load(atomic::Ordering::Relaxed) {
-    //         if let Some(transcode_thread) = self.transcode_thread.take() {
-    //             transcode_thread
-    //                 .join()
-    //                 .expect("Failed to join transcode thread")?;
-    //         }
-    //     }
-
-    //     Ok(())
-    // }
+        Ok(())
+    }
 
     /// Finishes encoding the video and performs any necessary cleanup.
     ///
