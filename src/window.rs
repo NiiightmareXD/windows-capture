@@ -216,16 +216,16 @@ impl Window {
     ///
     /// # Arguments
     ///
-    /// * `window` - The raw HWND.
+    /// * `hwnd` - The hwnd.
     #[must_use]
-    pub const fn from_raw_hwnd(window: HWND) -> Self {
-        Self { window }
+    pub const fn from_raw_hwnd(hwnd: isize) -> Self {
+        Self { window: HWND(hwnd)}
     }
 
     /// Returns the raw HWND of the window.
     #[must_use]
-    pub const fn as_raw_hwnd(&self) -> HWND {
-        self.window
+    pub const fn as_raw_hwnd(&self) -> isize {
+        self.window.0
     }
 
     // Callback used for enumerating all windows.
@@ -245,7 +245,7 @@ impl TryFrom<Window> for GraphicsCaptureItem {
     type Error = Error;
 
     fn try_from(value: Window) -> Result<Self, Self::Error> {
-        let window = value.as_raw_hwnd();
+        let window = HWND(value.as_raw_hwnd());
 
         let interop = windows::core::factory::<Self, IGraphicsCaptureItemInterop>()?;
         Ok(unsafe { interop.CreateForWindow(window)? })
