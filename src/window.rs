@@ -148,36 +148,32 @@ impl Window {
         if monitor.is_invalid() {
             None
         } else {
-            Some(Monitor::from_raw_hmonitor(monitor))
+            Some(Monitor::from_raw_hmonitor(monitor.0))
         }
     }
 
     /// Checks if the window is a valid window.
     ///
-    /// # Arguments
-    ///
-    /// * `window` - The window handle to check.
-    ///
     /// # Returns
     ///
     /// Returns `true` if the window is valid, `false` otherwise.
     #[must_use]
-    pub fn is_window_valid(window: HWND) -> bool {
-        if !unsafe { IsWindowVisible(window).as_bool() } {
+    pub fn is_valid(&self) -> bool {
+        if !unsafe { IsWindowVisible(self.window).as_bool() } {
             return false;
         }
 
         let mut id = 0;
-        unsafe { GetWindowThreadProcessId(window, Some(&mut id)) };
+        unsafe { GetWindowThreadProcessId(self.window, Some(&mut id)) };
         if id == unsafe { GetCurrentProcessId() } {
             return false;
         }
 
         let mut rect = RECT::default();
-        let result = unsafe { GetClientRect(window, &mut rect) };
+        let result = unsafe { GetClientRect(self.window, &mut rect) };
         if result.is_ok() {
-            let styles = unsafe { GetWindowLongPtrW(window, GWL_STYLE) };
-            let ex_styles = unsafe { GetWindowLongPtrW(window, GWL_EXSTYLE) };
+            let styles = unsafe { GetWindowLongPtrW(self.window, GWL_STYLE) };
+            let ex_styles = unsafe { GetWindowLongPtrW(self.window, GWL_EXSTYLE) };
 
             if (ex_styles & isize::try_from(WS_EX_TOOLWINDOW.0).unwrap()) != 0 {
                 return false;
@@ -216,10 +212,10 @@ impl Window {
     ///
     /// # Arguments
     ///
-    /// * `hwnd` - The hwnd.
+    /// * `hwnd` - The raw HWND.
     #[must_use]
     pub const fn from_raw_hwnd(hwnd: isize) -> Self {
-        Self { window: HWND(hwnd)}
+        Self { window: HWND(hwnd) }
     }
 
     /// Returns the raw HWND of the window.
@@ -232,7 +228,7 @@ impl Window {
     unsafe extern "system" fn enum_windows_callback(window: HWND, vec: LPARAM) -> BOOL {
         let windows = &mut *(vec.0 as *mut Vec<Self>);
 
-        if Self::is_window_valid(window) {
+        if Self::from_raw_hwnd(window.0).is_valid() {
             windows.push(Self { window });
         }
 

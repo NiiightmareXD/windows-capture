@@ -187,21 +187,23 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
 
 #[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
 pub enum GraphicsCaptureApiError<E> {
-    #[error("Failed To Join Thread")]
+    #[error("Failed to join thread")]
     FailedToJoinThread,
-    #[error("Failed To Initialize WinRT")]
+    #[error("Failed to initialize WinRT")]
     FailedToInitWinRT,
-    #[error("Failed To Create Dispatcher Queue Controller")]
+    #[error("Failed to translate message")]
+    FailedToTranslateMessage,
+    #[error("Failed to create dispatcher queue controller")]
     FailedToCreateDispatcherQueueController,
-    #[error("Failed To Shutdown Dispatcher Queue")]
+    #[error("Failed to shutdown dispatcher queue")]
     FailedToShutdownDispatcherQueue,
-    #[error("Failed To Set Dispatcher Queue Completed Handler")]
+    #[error("Failed to set dispatcher queue completed handler")]
     FailedToSetDispatcherQueueCompletedHandler,
-    #[error("Graphics Capture Error")]
+    #[error("Graphics capture error")]
     GraphicsCaptureApiError(graphics_capture_api::Error),
-    #[error("New Handler Error")]
+    #[error("New handler error")]
     NewHandlerError(E),
-    #[error("Frame Handler Error")]
+    #[error("Frame handler error")]
     FrameHandlerError(E),
 }
 
@@ -271,7 +273,9 @@ pub trait GraphicsCaptureApiHandler: Sized {
         let mut message = MSG::default();
         unsafe {
             while GetMessageW(&mut message, None, 0, 0).as_bool() {
-                TranslateMessage(&message);
+                TranslateMessage(&message)
+                    .ok()
+                    .map_err(|_| GraphicsCaptureApiError::FailedToTranslateMessage)?;
                 DispatchMessageW(&message);
             }
         }
@@ -293,7 +297,9 @@ pub trait GraphicsCaptureApiHandler: Sized {
         let mut message = MSG::default();
         unsafe {
             while GetMessageW(&mut message, None, 0, 0).as_bool() {
-                TranslateMessage(&message);
+                TranslateMessage(&message)
+                    .ok()
+                    .map_err(|_| GraphicsCaptureApiError::FailedToTranslateMessage)?;
                 DispatchMessageW(&message);
             }
         }
@@ -384,7 +390,9 @@ pub trait GraphicsCaptureApiHandler: Sized {
                 let mut message = MSG::default();
                 unsafe {
                     while GetMessageW(&mut message, None, 0, 0).as_bool() {
-                        TranslateMessage(&message);
+                        TranslateMessage(&message)
+                            .ok()
+                            .map_err(|_| GraphicsCaptureApiError::FailedToTranslateMessage)?;
                         DispatchMessageW(&message);
                     }
                 }
@@ -409,7 +417,9 @@ pub trait GraphicsCaptureApiHandler: Sized {
                 let mut message = MSG::default();
                 unsafe {
                     while GetMessageW(&mut message, None, 0, 0).as_bool() {
-                        TranslateMessage(&message);
+                        TranslateMessage(&message)
+                            .ok()
+                            .map_err(|_| GraphicsCaptureApiError::FailedToTranslateMessage)?;
                         DispatchMessageW(&message);
                     }
                 }

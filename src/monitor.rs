@@ -129,7 +129,7 @@ impl Monitor {
         };
         if unsafe {
             !GetMonitorInfoW(
-                self.as_raw_hmonitor(),
+                HMONITOR(self.as_raw_hmonitor()),
                 std::ptr::addr_of_mut!(monitor_info).cast(),
             )
             .as_bool()
@@ -242,7 +242,7 @@ impl Monitor {
         };
         if unsafe {
             !GetMonitorInfoW(
-                self.as_raw_hmonitor(),
+                HMONITOR(self.as_raw_hmonitor()),
                 std::ptr::addr_of_mut!(monitor_info).cast(),
             )
             .as_bool()
@@ -280,7 +280,7 @@ impl Monitor {
         };
         if unsafe {
             !GetMonitorInfoW(
-                self.as_raw_hmonitor(),
+                HMONITOR(self.as_raw_hmonitor()),
                 std::ptr::addr_of_mut!(monitor_info).cast(),
             )
             .as_bool()
@@ -422,16 +422,18 @@ impl Monitor {
     ///
     /// # Arguments
     ///
-    /// * `monitor` - The raw HMONITOR.
+    /// * `hmonitor` - The raw HMONITOR.
     #[must_use]
-    pub const fn from_raw_hmonitor(monitor: HMONITOR) -> Self {
-        Self { monitor }
+    pub const fn from_raw_hmonitor(monitor: isize) -> Self {
+        Self {
+            monitor: HMONITOR(monitor),
+        }
     }
 
     /// Returns the raw HMONITOR of the monitor.
     #[must_use]
-    pub const fn as_raw_hmonitor(&self) -> HMONITOR {
-        self.monitor
+    pub const fn as_raw_hmonitor(&self) -> isize {
+        self.monitor.0
     }
 
     // Callback Used For Enumerating All Monitors
@@ -454,7 +456,7 @@ impl TryFrom<Monitor> for GraphicsCaptureItem {
     type Error = Error;
 
     fn try_from(value: Monitor) -> Result<Self, Self::Error> {
-        let monitor = value.as_raw_hmonitor();
+        let monitor = HMONITOR(value.as_raw_hmonitor());
 
         let interop = windows::core::factory::<Self, IGraphicsCaptureItemInterop>()?;
         Ok(unsafe { interop.CreateForMonitor(monitor)? })
