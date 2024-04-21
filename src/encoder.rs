@@ -571,6 +571,7 @@ impl VideoEncoder {
     /// # Arguments
     ///
     /// * `buffer` - A reference to the byte slice to be encoded Windows API expect this to be Bgra and bottom-top.
+    /// * `timespan` - The timespan that correlates to the frame buffer.
     ///
     /// # Returns
     ///
@@ -581,7 +582,17 @@ impl VideoEncoder {
         buffer: &[u8],
         timespan: i64,
     ) -> Result<(), VideoEncoderError> {
-        let timespan = TimeSpan { Duration: timespan };
+        let frame_timespan = timespan;
+        let timespan = match self.first_timespan {
+            Some(timespan) => TimeSpan {
+                Duration: frame_timespan - timespan.Duration,
+            },
+            None => {
+                let timespan = frame_timespan;
+                self.first_timespan = Some(TimeSpan { Duration: timespan });
+                TimeSpan { Duration: 0 }
+            }
+        };
 
         self.frame_sender.send(Some((
             VideoEncoderSource::Buffer((SendDirectX::new(buffer.as_ptr()), buffer.len())),
