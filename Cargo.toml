@@ -42,6 +42,7 @@ windows = { version = "0.54.0", features = [
     "Media_MediaProperties",
     "Media_Core",
     "Media_Transcoding",
+    "Security_Cryptography",
 ] }
 
 # Mutex optimization

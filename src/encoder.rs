@@ -1,6 +1,7 @@
 use std::{
     fs::{self, File},
     path::Path,
+    slice,
     sync::{
         atomic::{self, AtomicBool},
         mpsc, Arc,
@@ -27,6 +28,7 @@ use windows::{
         },
         Transcoding::MediaTranscoder,
     },
+    Security::Cryptography::CryptographicBuffer,
     Storage::{
         FileAccessMode, StorageFile,
         Streams::{
@@ -143,7 +145,7 @@ pub enum VideoEncoderError {
     #[error("Windows API Error: {0}")]
     WindowsError(#[from] windows::core::Error),
     #[error("Frame send error")]
-    FrameSendError(#[from] mpsc::SendError<Option<(SendDirectX<IDirect3DSurface>, TimeSpan)>>),
+    FrameSendError(#[from] mpsc::SendError<Option<(VideoEncoderSource, TimeSpan)>>),
     #[error("IO Error: {0}")]
     IoError(#[from] std::io::Error),
 }
@@ -173,10 +175,16 @@ pub enum VideoEncoderQuality {
     Uhd4320p = 9,
 }
 
+/// The `VideoEncoderSource` struct represents all the types that can be send to the encoder.
+pub enum VideoEncoderSource {
+    DirectX(SendDirectX<IDirect3DSurface>),
+    Buffer((SendDirectX<*mut u8>, usize)),
+}
+
 /// The `VideoEncoder` struct represents a video encoder that can be used to encode video frames and save them to a specified file path.
 pub struct VideoEncoder {
     first_timespan: Option<TimeSpan>,
-    frame_sender: mpsc::Sender<Option<(SendDirectX<IDirect3DSurface>, TimeSpan)>>,
+    frame_sender: mpsc::Sender<Option<(VideoEncoderSource, TimeSpan)>>,
     sample_requested: EventRegistrationToken,
     media_stream_source: MediaStreamSource,
     starting: EventRegistrationToken,
@@ -237,7 +245,7 @@ impl VideoEncoder {
         media_stream_source.SetBufferTime(TimeSpan::default())?;
 
         let (frame_sender, frame_receiver) =
-            mpsc::channel::<Option<(SendDirectX<IDirect3DSurface>, TimeSpan)>>();
+            mpsc::channel::<Option<(VideoEncoderSource, TimeSpan)>>();
 
         let starting = media_stream_source.Starting(&TypedEventHandler::<
             MediaStreamSource,
@@ -273,9 +281,22 @@ impl VideoEncoder {
                 };
 
                 match frame {
-                    Some((surface, timespan)) => {
-                        let sample =
-                            MediaStreamSample::CreateFromDirect3D11Surface(&surface.0, timespan)?;
+                    Some((source, timespan)) => {
+                        let sample = match source {
+                            VideoEncoderSource::DirectX(surface) => {
+                                MediaStreamSample::CreateFromDirect3D11Surface(
+                                    &surface.0, timespan,
+                                )?
+                            }
+                            VideoEncoderSource::Buffer(buffer_data) => {
+                                let buffer = buffer_data.0;
+                                let buffer =
+                                    unsafe { slice::from_raw_parts(buffer.0, buffer_data.1) };
+                                let buffer = CryptographicBuffer::CreateFromByteArray(buffer)?;
+                                MediaStreamSample::CreateFromBuffer(&buffer, timespan)?
+                            }
+                        };
+
                         sample_requested.Request()?.SetSample(&sample)?;
                     }
                     None => {
@@ -391,7 +412,7 @@ impl VideoEncoder {
         media_stream_source.SetBufferTime(TimeSpan::default())?;
 
         let (frame_sender, frame_receiver) =
-            mpsc::channel::<Option<(SendDirectX<IDirect3DSurface>, TimeSpan)>>();
+            mpsc::channel::<Option<(VideoEncoderSource, TimeSpan)>>();
 
         let starting = media_stream_source.Starting(&TypedEventHandler::<
             MediaStreamSource,
@@ -427,9 +448,22 @@ impl VideoEncoder {
                 };
 
                 match frame {
-                    Some((surface, timespan)) => {
-                        let sample =
-                            MediaStreamSample::CreateFromDirect3D11Surface(&surface.0, timespan)?;
+                    Some((source, timespan)) => {
+                        let sample = match source {
+                            VideoEncoderSource::DirectX(surface) => {
+                                MediaStreamSample::CreateFromDirect3D11Surface(
+                                    &surface.0, timespan,
+                                )?
+                            }
+                            VideoEncoderSource::Buffer(buffer_data) => {
+                                let buffer = buffer_data.0;
+                                let buffer =
+                                    unsafe { slice::from_raw_parts(buffer.0, buffer_data.1) };
+                                let buffer = CryptographicBuffer::CreateFromByteArray(buffer)?;
+                                MediaStreamSample::CreateFromBuffer(&buffer, timespan)?
+                            }
+                        };
+
                         sample_requested.Request()?.SetSample(&sample)?;
                     }
                     None => {
@@ -511,7 +545,8 @@ impl VideoEncoder {
 
         let surface = SendDirectX(unsafe { frame.as_raw_surface() });
 
-        self.frame_sender.send(Some((surface, timespan)))?;
+        self.frame_sender
+            .send(Some((VideoEncoderSource::DirectX(surface), timespan)))?;
 
         let (lock, cvar) = &*self.frame_notify;
         let mut processed = lock.lock();
@@ -531,6 +566,47 @@ impl VideoEncoder {
 
         Ok(())
     }
+
+    // /// Sends a video frame to the video encoder for encoding.
+    // ///
+    // /// # Arguments
+    // ///
+    // /// * `frame` - A mutable reference to the `Frame` to be encoded.
+    // ///
+    // /// # Returns
+    // ///
+    // /// Returns `Ok(())` if the frame is successfully sent for encoding, or a `VideoEncoderError`
+    // /// if an error occurs.
+    // pub fn send_frame_buffer(
+    //     &mut self,
+    //     frame: &mut Frame,
+    //     timespan: i64,
+    // ) -> Result<(), VideoEncoderError> {
+    //     let timespan = TimeSpan { Duration: timespan };
+
+    //     let surface = SendDirectX(unsafe { frame.as_raw_surface() });
+
+    //     self.frame_sender
+    //         .send(Some((VideoEncoderSource::DirectX(surface), timespan)))?;
+
+    //     let (lock, cvar) = &*self.frame_notify;
+    //     let mut processed = lock.lock();
+    //     if !*processed {
+    //         cvar.wait(&mut processed);
+    //     }
+    //     *processed = false;
+    //     drop(processed);
+
+    //     if self.error_notify.load(atomic::Ordering::Relaxed) {
+    //         if let Some(transcode_thread) = self.transcode_thread.take() {
+    //             transcode_thread
+    //                 .join()
+    //                 .expect("Failed to join transcode thread")?;
+    //         }
+    //     }
+
+    //     Ok(())
+    // }
 
     /// Finishes encoding the video and performs any necessary cleanup.
     ///
