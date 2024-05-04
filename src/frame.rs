@@ -445,7 +445,7 @@ impl<'a> FrameBuffer<'a> {
 
     /// Get the raw pixel data with possible padding.
     #[must_use]
-    pub fn as_raw_buffer(&'a mut self) -> &'a mut [u8] {
+    pub fn as_raw_buffer(&mut self) -> &mut [u8] {
         self.raw_buffer
     }
 
@@ -454,7 +454,7 @@ impl<'a> FrameBuffer<'a> {
     /// # Returns
     ///
     /// A mutable reference to the buffer containing pixel data without padding.
-    pub fn as_raw_nopadding_buffer(&'a mut self) -> Result<&'a mut [u8], Error> {
+    pub fn as_raw_nopadding_buffer(&mut self) -> Result<&mut [u8], Error> {
         if !self.has_padding() {
             return Ok(self.raw_buffer);
         }
@@ -493,7 +493,7 @@ impl<'a> FrameBuffer<'a> {
     ///
     /// An `Ok` result if the image is successfully saved, or an `Err` result if there was an error.
     pub fn save_as_image<T: AsRef<Path>>(
-        &'a mut self,
+        &mut self,
         path: T,
         format: ImageFormat,
     ) -> Result<(), Error> {
