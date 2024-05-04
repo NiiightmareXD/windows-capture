@@ -11,6 +11,7 @@ use std::{
 use parking_lot::Mutex;
 use windows::{
     Foundation::AsyncActionCompletedHandler,
+    Graphics::Capture::GraphicsCaptureItem,
     Win32::{
         Foundation::{HANDLE, LPARAM, WPARAM},
         System::{
@@ -197,6 +198,8 @@ pub enum GraphicsCaptureApiError<E> {
     FailedToShutdownDispatcherQueue,
     #[error("Failed to set dispatcher queue completed handler")]
     FailedToSetDispatcherQueueCompletedHandler,
+    #[error("Failed to convert item to GraphicsCaptureItem")]
+    ItemConvertFailed,
     #[error("Graphics capture error")]
     GraphicsCaptureApiError(graphics_capture_api::Error),
     #[error("New handler error")]
@@ -223,7 +226,9 @@ pub trait GraphicsCaptureApiHandler: Sized {
     /// # Returns
     ///
     /// Returns `Ok(())` if the capture was successful, otherwise returns an error of type `GraphicsCaptureApiError`.
-    fn start(settings: Settings<Self::Flags>) -> Result<(), GraphicsCaptureApiError<Self::Error>>
+    fn start<T: TryInto<GraphicsCaptureItem>>(
+        settings: Settings<Self::Flags, T>,
+    ) -> Result<(), GraphicsCaptureApiError<Self::Error>>
     where
         Self: Send + 'static,
         <Self as GraphicsCaptureApiHandler>::Flags: Send,
@@ -253,8 +258,14 @@ pub trait GraphicsCaptureApiHandler: Sized {
         let callback = Arc::new(Mutex::new(
             Self::new(settings.flags).map_err(GraphicsCaptureApiError::NewHandlerError)?,
         ));
+
+        let item = match settings.item.try_into() {
+            Ok(item) => item,
+            Err(_) => return Err(GraphicsCaptureApiError::ItemConvertFailed),
+        };
+
         let mut capture = GraphicsCaptureApi::new(
-            settings.item,
+            item,
             callback,
             settings.cursor_capture,
             settings.draw_border,
@@ -321,8 +332,8 @@ pub trait GraphicsCaptureApiHandler: Sized {
     /// # Returns
     ///
     /// Returns `Ok(CaptureControl)` if the capture was successful, otherwise returns an error of type `GraphicsCaptureApiError`.
-    fn start_free_threaded(
-        settings: Settings<Self::Flags>,
+    fn start_free_threaded<T: TryInto<GraphicsCaptureItem> + Send>(
+        settings: Settings<Self::Flags, T>,
     ) -> Result<CaptureControl<Self, Self::Error>, GraphicsCaptureApiError<Self::Error>>
     where
         Self: Send + 'static,
@@ -330,6 +341,11 @@ pub trait GraphicsCaptureApiHandler: Sized {
     {
         let (halt_sender, halt_receiver) = mpsc::channel::<Arc<AtomicBool>>();
         let (callback_sender, callback_receiver) = mpsc::channel::<Arc<Mutex<Self>>>();
+
+        let item = match settings.item.try_into() {
+            Ok(item) => item,
+            Err(_) => return Err(GraphicsCaptureApiError::ItemConvertFailed),
+        };
 
         let thread_handle = thread::spawn(
             move || -> Result<(), GraphicsCaptureApiError<Self::Error>> {
@@ -359,8 +375,9 @@ pub trait GraphicsCaptureApiHandler: Sized {
                 let callback = Arc::new(Mutex::new(
                     Self::new(settings.flags).map_err(GraphicsCaptureApiError::NewHandlerError)?,
                 ));
+
                 let mut capture = GraphicsCaptureApi::new(
-                    settings.item,
+                    item,
                     callback.clone(),
                     settings.cursor_capture,
                     settings.draw_border,

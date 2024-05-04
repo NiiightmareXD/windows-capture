@@ -172,7 +172,7 @@ impl NativeWindowsCapture {
 
     /// Start Capture
     pub fn start(&mut self) -> PyResult<()> {
-        let settings = if self.window_name.is_some() {
+        if self.window_name.is_some() {
             let window = match Window::from_contains_name(self.window_name.as_ref().unwrap()) {
                 Ok(window) => window,
                 Err(e) => {
@@ -182,7 +182,7 @@ impl NativeWindowsCapture {
                 }
             };
 
-            match Settings::new(
+            let settings = Settings::new(
                 window,
                 self.cursor_capture.clone(),
                 self.draw_border.clone(),
@@ -191,11 +191,22 @@ impl NativeWindowsCapture {
                     self.on_frame_arrived_callback.clone(),
                     self.on_closed.clone(),
                 ),
-            ) {
-                Ok(settings) => settings,
+            );
+
+            match InnerNativeWindowsCapture::start(settings) {
+                Ok(()) => (),
                 Err(e) => {
+                    if let GraphicsCaptureApiError::FrameHandlerError(
+                        InnerNativeWindowsCaptureError::PythonError(ref e),
+                    ) = e
+                    {
+                        return Err(PyException::new_err(format!(
+                            "Capture Session Threw An Exception -> {e}",
+                        )));
+                    }
+
                     return Err(PyException::new_err(format!(
-                        "Failed To Create Windows Capture Settings -> {e}"
+                        "Capture Session Threw An Exception -> {e}",
                     )));
                 }
             }
@@ -209,7 +220,7 @@ impl NativeWindowsCapture {
                 }
             };
 
-            match Settings::new(
+            let settings = Settings::new(
                 monitor,
                 self.cursor_capture.clone(),
                 self.draw_border.clone(),
@@ -218,40 +229,33 @@ impl NativeWindowsCapture {
                     self.on_frame_arrived_callback.clone(),
                     self.on_closed.clone(),
                 ),
-            ) {
-                Ok(settings) => settings,
-                Err(e) => {
-                    return Err(PyException::new_err(format!(
-                        "Failed To Create Windows Capture Settings -> {e}"
-                    )));
-                }
-            }
-        };
+            );
 
-        match InnerNativeWindowsCapture::start(settings) {
-            Ok(()) => (),
-            Err(e) => {
-                if let GraphicsCaptureApiError::FrameHandlerError(
-                    InnerNativeWindowsCaptureError::PythonError(ref e),
-                ) = e
-                {
+            match InnerNativeWindowsCapture::start(settings) {
+                Ok(()) => (),
+                Err(e) => {
+                    if let GraphicsCaptureApiError::FrameHandlerError(
+                        InnerNativeWindowsCaptureError::PythonError(ref e),
+                    ) = e
+                    {
+                        return Err(PyException::new_err(format!(
+                            "Capture Session Threw An Exception -> {e}",
+                        )));
+                    }
+
                     return Err(PyException::new_err(format!(
                         "Capture Session Threw An Exception -> {e}",
                     )));
                 }
-
-                return Err(PyException::new_err(format!(
-                    "Capture Session Threw An Exception -> {e}",
-                )));
             }
-        }
+        };
 
         Ok(())
     }
 
     /// Start Capture On A Dedicated Thread
     pub fn start_free_threaded(&mut self) -> PyResult<NativeCaptureControl> {
-        let settings = if self.window_name.is_some() {
+        let capture_control = if self.window_name.is_some() {
             let window = match Window::from_contains_name(self.window_name.as_ref().unwrap()) {
                 Ok(window) => window,
                 Err(e) => {
@@ -261,7 +265,7 @@ impl NativeWindowsCapture {
                 }
             };
 
-            match Settings::new(
+            let settings = Settings::new(
                 window,
                 self.cursor_capture.clone(),
                 self.draw_border.clone(),
@@ -270,14 +274,27 @@ impl NativeWindowsCapture {
                     self.on_frame_arrived_callback.clone(),
                     self.on_closed.clone(),
                 ),
-            ) {
-                Ok(settings) => settings,
+            );
+
+            let capture_control = match InnerNativeWindowsCapture::start_free_threaded(settings) {
+                Ok(capture_control) => capture_control,
                 Err(e) => {
+                    if let GraphicsCaptureApiError::FrameHandlerError(
+                        InnerNativeWindowsCaptureError::PythonError(ref e),
+                    ) = e
+                    {
+                        return Err(PyException::new_err(format!(
+                            "Capture Session Threw An Exception -> {e}",
+                        )));
+                    }
+
                     return Err(PyException::new_err(format!(
-                        "Failed To Create Windows Capture Settings -> {e}"
+                        "Capture Session Threw An Exception -> {e}",
                     )));
                 }
-            }
+            };
+
+            NativeCaptureControl::new(capture_control)
         } else {
             let monitor = match Monitor::from_index(self.monitor_index.unwrap()) {
                 Ok(monitor) => monitor,
@@ -288,7 +305,7 @@ impl NativeWindowsCapture {
                 }
             };
 
-            match Settings::new(
+            let settings = Settings::new(
                 monitor,
                 self.cursor_capture.clone(),
                 self.draw_border.clone(),
@@ -297,35 +314,28 @@ impl NativeWindowsCapture {
                     self.on_frame_arrived_callback.clone(),
                     self.on_closed.clone(),
                 ),
-            ) {
-                Ok(settings) => settings,
-                Err(e) => {
-                    return Err(PyException::new_err(format!(
-                        "Failed To Create Windows Capture Settings -> {e}"
-                    )));
-                }
-            }
-        };
+            );
 
-        let capture_control = match InnerNativeWindowsCapture::start_free_threaded(settings) {
-            Ok(capture_control) => capture_control,
-            Err(e) => {
-                if let GraphicsCaptureApiError::FrameHandlerError(
-                    InnerNativeWindowsCaptureError::PythonError(ref e),
-                ) = e
-                {
+            let capture_control = match InnerNativeWindowsCapture::start_free_threaded(settings) {
+                Ok(capture_control) => capture_control,
+                Err(e) => {
+                    if let GraphicsCaptureApiError::FrameHandlerError(
+                        InnerNativeWindowsCaptureError::PythonError(ref e),
+                    ) = e
+                    {
+                        return Err(PyException::new_err(format!(
+                            "Capture Session Threw An Exception -> {e}",
+                        )));
+                    }
+
                     return Err(PyException::new_err(format!(
                         "Capture Session Threw An Exception -> {e}",
                     )));
                 }
+            };
 
-                return Err(PyException::new_err(format!(
-                    "Capture Session Threw An Exception -> {e}",
-                )));
-            }
+            NativeCaptureControl::new(capture_control)
         };
-
-        let capture_control = NativeCaptureControl::new(capture_control);
 
         Ok(capture_control)
     }

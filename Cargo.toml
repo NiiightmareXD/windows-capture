@@ -1,6 +1,6 @@
 [package]
 name = "windows-capture"
-version = "1.1.7"
+version = "1.1.8"
 authors = ["NiiightmareXD"]
 edition = "2021"
 description = "Fastest Windows Screen Capture Library For Rust 🔥"
@@ -46,13 +46,13 @@ windows = { version = "0.56.0", features = [
 ] }
 
 # Mutex optimization
-parking_lot = "0.12.1"
+parking_lot = "0.12.2"
 
 # Multithreading
 rayon = "1.10.0"
 
 # Error handling
-thiserror = "1.0.58"
+thiserror = "1.0.59"
 
 [package.metadata.docs.rs]
 default-target = "x86_64-pc-windows-msvc"

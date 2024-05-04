@@ -102,8 +102,7 @@ fn main() {
         ColorFormat::Rgba8,
         // Additional flags for the capture settings that will be passed to user defined `new` function.
         "Yea This Works".to_string(),
-    )
-    .unwrap();
+    );
 
     // Starts the capture and takes control of the current thread.
     // The errors from handler trait will end up here

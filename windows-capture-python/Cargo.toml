@@ -1,6 +1,6 @@
 [package]
 name = "windows-capture-python"
-version = "1.1.7"
+version = "1.1.8"
 authors = ["NiiightmareXD"]
 edition = "2021"
 description = "Fastest Windows Screen Capture Library For Python 🔥"
@@ -25,5 +25,5 @@ pyo3 = { version = "0.21.2", features = [
     "extension-module",
     "auto-initialize",
 ] }
-thiserror = "1.0.58"
+thiserror = "1.0.59"
 windows-capture = { path = ".." }
