@@ -332,7 +332,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
     /// # Returns
     ///
     /// Returns `Ok(CaptureControl)` if the capture was successful, otherwise returns an error of type `GraphicsCaptureApiError`.
-    fn start_free_threaded<T: TryInto<GraphicsCaptureItem> + Send>(
+    fn start_free_threaded<T: TryInto<GraphicsCaptureItem> + Send + 'static>(
         settings: Settings<Self::Flags, T>,
     ) -> Result<CaptureControl<Self, Self::Error>, GraphicsCaptureApiError<Self::Error>>
     where
@@ -341,11 +341,6 @@ pub trait GraphicsCaptureApiHandler: Sized {
     {
         let (halt_sender, halt_receiver) = mpsc::channel::<Arc<AtomicBool>>();
         let (callback_sender, callback_receiver) = mpsc::channel::<Arc<Mutex<Self>>>();
-
-        let item = match settings.item.try_into() {
-            Ok(item) => item,
-            Err(_) => return Err(GraphicsCaptureApiError::ItemConvertFailed),
-        };
 
         let thread_handle = thread::spawn(
             move || -> Result<(), GraphicsCaptureApiError<Self::Error>> {
@@ -375,6 +370,9 @@ pub trait GraphicsCaptureApiHandler: Sized {
                 let callback = Arc::new(Mutex::new(
                     Self::new(settings.flags).map_err(GraphicsCaptureApiError::NewHandlerError)?,
                 ));
+
+                let item = settings.item.try_into()
+                    .map_err(|_| GraphicsCaptureApiError::ItemConvertFailed)?;
 
                 let mut capture = GraphicsCaptureApi::new(
                     item,
