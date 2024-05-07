@@ -259,10 +259,10 @@ pub trait GraphicsCaptureApiHandler: Sized {
             Self::new(settings.flags).map_err(GraphicsCaptureApiError::NewHandlerError)?,
         ));
 
-        let item = match settings.item.try_into() {
-            Ok(item) => item,
-            Err(_) => return Err(GraphicsCaptureApiError::ItemConvertFailed),
-        };
+        let item = settings
+            .item
+            .try_into()
+            .map_err(|_| GraphicsCaptureApiError::ItemConvertFailed)?;
 
         let mut capture = GraphicsCaptureApi::new(
             item,
@@ -371,7 +371,9 @@ pub trait GraphicsCaptureApiHandler: Sized {
                     Self::new(settings.flags).map_err(GraphicsCaptureApiError::NewHandlerError)?,
                 ));
 
-                let item = settings.item.try_into()
+                let item = settings
+                    .item
+                    .try_into()
                     .map_err(|_| GraphicsCaptureApiError::ItemConvertFailed)?;
 
                 let mut capture = GraphicsCaptureApi::new(
