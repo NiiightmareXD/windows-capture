@@ -25,5 +25,5 @@ pyo3 = { version = "0.21.2", features = [
     "extension-module",
     "auto-initialize",
 ] }
-thiserror = "1.0.59"
+thiserror = "1.0.60"
 windows-capture = { path = ".." }
