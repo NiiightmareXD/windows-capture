@@ -459,12 +459,18 @@ impl<'a> FrameBuffer<'a> {
             return Ok(self.raw_buffer);
         }
 
-        let frame_size = (self.width * self.height * 4) as usize;
+        let multiplyer = match self.color_format {
+            ColorFormat::Rgba16F => 8,
+            ColorFormat::Rgba8 => 4,
+            ColorFormat::Bgra8 => 4,
+        };
+
+        let frame_size = (self.width * self.height * multiplyer) as usize;
         if self.buffer.capacity() < frame_size {
             self.buffer.resize(frame_size, 0);
         }
 
-        let width_size = (self.width * 4) as usize;
+        let width_size = (self.width * multiplyer) as usize;
         let buffer_address = self.buffer.as_mut_ptr() as isize;
         (0..self.height).into_par_iter().for_each(|y| {
             let index = (y * self.row_pitch) as usize;
