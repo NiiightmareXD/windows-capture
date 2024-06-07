@@ -231,6 +231,12 @@ impl VideoEncoder {
                 MediaEncodingProfile::CreateWmv(VideoEncodingQuality(encoder_quality as i32))?
             }
         };
+        media_encoding_profile
+            .Video()?
+            .SetWidth(width)?;
+        media_encoding_profile
+            .Video()?
+            .SetHeight(height)?;
 
         let video_encoding_properties = VideoEncodingProperties::CreateUncompressed(
             &MediaEncodingSubtypes::Bgra8()?,
