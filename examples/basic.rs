@@ -34,8 +34,8 @@ impl GraphicsCaptureApiHandler for Capture {
         let encoder = VideoEncoder::new(
             VideoEncoderType::Hevc,
             VideoEncoderQuality::HD1080p,
-            2560,
-            1440,
+            1920,
+            1080,
             "video.mp4",
             Some(30),
         )?;
