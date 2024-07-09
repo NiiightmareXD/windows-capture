@@ -32,11 +32,12 @@ impl GraphicsCaptureApiHandler for Capture {
         println!("Got The Flag: {message}");
 
         let encoder = VideoEncoder::new(
-            VideoEncoderType::Mp4,
+            VideoEncoderType::Hevc,
             VideoEncoderQuality::HD1080p,
-            1920,
-            1080,
+            2560,
+            1440,
             "video.mp4",
+            Some(30),
         )?;
 
         Ok(Self {

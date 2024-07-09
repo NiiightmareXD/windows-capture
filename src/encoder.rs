@@ -159,6 +159,8 @@ pub enum VideoEncoderType {
     Hevc,
     Mp4,
     Wmv,
+    Av1,
+    Vp9,
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
@@ -214,6 +216,7 @@ impl VideoEncoder {
         width: u32,
         height: u32,
         path: P,
+        fps: Option<u32>,
     ) -> Result<Self, VideoEncoderError> {
         let path = path.as_ref();
 
@@ -230,6 +233,12 @@ impl VideoEncoder {
             VideoEncoderType::Wmv => {
                 MediaEncodingProfile::CreateWmv(VideoEncodingQuality(encoder_quality as i32))?
             }
+            VideoEncoderType::Av1 => {
+                MediaEncodingProfile::CreateAv1(VideoEncodingQuality(encoder_quality as i32))?
+            }
+            VideoEncoderType::Vp9 => {
+                MediaEncodingProfile::CreateVp9(VideoEncodingQuality(encoder_quality as i32))?
+            }
         };
         media_encoding_profile
             .Video()?
@@ -237,7 +246,17 @@ impl VideoEncoder {
         media_encoding_profile
             .Video()?
             .SetHeight(height)?;
-
+        if fps.is_some() {
+            media_encoding_profile
+                .Video()?
+                .FrameRate()?
+                .SetNumerator(fps.unwrap())?;
+            media_encoding_profile
+                .Video()?
+                .FrameRate()?
+                .SetDenominator(1)?;
+        }
+    
         let video_encoding_properties = VideoEncodingProperties::CreateUncompressed(
             &MediaEncodingSubtypes::Bgra8()?,
             width,
@@ -402,6 +421,12 @@ impl VideoEncoder {
             }
             VideoEncoderType::Wmv => {
                 MediaEncodingProfile::CreateWmv(VideoEncodingQuality(encoder_quality as i32))?
+            }
+            VideoEncoderType::Av1 => {
+                MediaEncodingProfile::CreateAv1(VideoEncodingQuality(encoder_quality as i32))?
+            }
+            VideoEncoderType::Vp9 => {
+                MediaEncodingProfile::CreateVp9(VideoEncodingQuality(encoder_quality as i32))?
             }
         };
 
