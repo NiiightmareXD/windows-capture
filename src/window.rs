@@ -49,6 +49,8 @@ pub struct Window {
     window: HWND,
 }
 
+unsafe impl Send for Window {}
+
 impl Window {
     /// Returns the foreground window.
     ///
@@ -58,7 +60,7 @@ impl Window {
     pub fn foreground() -> Result<Self, Error> {
         let window = unsafe { GetForegroundWindow() };
 
-        if window.0 == 0 {
+        if window.is_invalid() {
             return Err(Error::NoActiveWindow);
         }
 
@@ -76,9 +78,9 @@ impl Window {
     /// Returns an `Error::NotFound` if the window is not found.
     pub fn from_name(title: &str) -> Result<Self, Error> {
         let hstring_title = HSTRING::from(title);
-        let window = unsafe { FindWindowW(None, &hstring_title) };
+        let window = unsafe { FindWindowW(None, &hstring_title)? };
 
-        if window.0 == 0 {
+        if window.is_invalid() {
             return Err(Error::NotFound(String::from(title)));
         }
 
@@ -214,13 +216,13 @@ impl Window {
     ///
     /// * `hwnd` - The raw HWND.
     #[must_use]
-    pub const fn from_raw_hwnd(hwnd: isize) -> Self {
+    pub const fn from_raw_hwnd(hwnd: *mut std::ffi::c_void) -> Self {
         Self { window: HWND(hwnd) }
     }
 
     /// Returns the raw HWND of the window.
     #[must_use]
-    pub const fn as_raw_hwnd(&self) -> isize {
+    pub const fn as_raw_hwnd(&self) -> *mut std::ffi::c_void {
         self.window.0
     }
 

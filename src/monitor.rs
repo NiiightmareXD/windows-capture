@@ -61,6 +61,8 @@ pub struct Monitor {
     monitor: HMONITOR,
 }
 
+unsafe impl Send for Monitor {}
+
 impl Monitor {
     /// Returns the primary monitor.
     ///
@@ -424,7 +426,7 @@ impl Monitor {
     ///
     /// * `hmonitor` - The raw HMONITOR.
     #[must_use]
-    pub const fn from_raw_hmonitor(monitor: isize) -> Self {
+    pub const fn from_raw_hmonitor(monitor: *mut std::ffi::c_void) -> Self {
         Self {
             monitor: HMONITOR(monitor),
         }
@@ -432,7 +434,7 @@ impl Monitor {
 
     /// Returns the raw HMONITOR of the monitor.
     #[must_use]
-    pub const fn as_raw_hmonitor(&self) -> isize {
+    pub const fn as_raw_hmonitor(&self) -> *mut std::ffi::c_void {
         self.monitor.0
     }
 

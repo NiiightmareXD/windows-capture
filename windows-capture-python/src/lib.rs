@@ -130,6 +130,7 @@ pub struct NativeWindowsCapture {
 #[pymethods]
 impl NativeWindowsCapture {
     #[new]
+    #[pyo3(signature = (on_frame_arrived_callback, on_closed, cursor_capture=None, draw_border=None, monitor_index=None, window_name=None))]
     pub fn new(
         on_frame_arrived_callback: PyObject,
         on_closed: PyObject,
