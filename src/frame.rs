@@ -156,12 +156,12 @@ impl<'a> Frame<'a> {
         self.frame_surface.clone()
     }
 
-    /// Get the frame buffer.
+    /// Get the raw texture of the frame.
     ///
     /// # Returns
     ///
-    /// The FrameBuffer containing the frame data.
-    pub fn buffer(&mut self) -> Result<FrameBuffer, Error> {
+    /// The ID3D11Texture2D representing the raw texture of the frame.
+    pub fn texture(&self) -> Result<ID3D11Texture2D, Error> {
         // Texture Settings
         let texture_desc = D3D11_TEXTURE2D_DESC {
             Width: self.width,
@@ -185,7 +185,18 @@ impl<'a> Frame<'a> {
             self.d3d_device
                 .CreateTexture2D(&texture_desc, None, Some(&mut texture))?;
         };
+        
         let texture = texture.unwrap();
+        Ok(texture)
+    }
+
+    /// Get the frame buffer.
+    ///
+    /// # Returns
+    ///
+    /// The FrameBuffer containing the frame data.
+    pub fn buffer(&mut self) -> Result<FrameBuffer, Error> {
+        let texture = self.texture()?;
 
         // Copy the real texture to copy texture
         unsafe {
