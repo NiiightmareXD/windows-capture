@@ -187,6 +187,12 @@ impl<'a> Frame<'a> {
         };
         
         let texture = texture.unwrap();
+        
+        // Copy the real texture to copy texture
+        unsafe {
+            self.context.CopyResource(&texture, &self.frame_texture);
+        };
+
         Ok(texture)
     }
 
@@ -197,11 +203,6 @@ impl<'a> Frame<'a> {
     /// The FrameBuffer containing the frame data.
     pub fn buffer(&mut self) -> Result<FrameBuffer, Error> {
         let texture = self.texture()?;
-
-        // Copy the real texture to copy texture
-        unsafe {
-            self.context.CopyResource(&texture, &self.frame_texture);
-        };
 
         // Map the texture to enable CPU access
         let mut mapped_resource = D3D11_MAPPED_SUBRESOURCE::default();
