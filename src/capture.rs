@@ -68,6 +68,7 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
     ///
     /// The newly created CaptureControl struct.
     #[must_use]
+    #[inline]
     pub fn new(
         thread_handle: JoinHandle<Result<(), GraphicsCaptureApiError<E>>>,
         halt_handle: Arc<AtomicBool>,
@@ -86,6 +87,7 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
     ///
     /// `true` if the capture thread is finished, `false` otherwise.
     #[must_use]
+    #[inline]
     pub fn is_finished(&self) -> bool {
         self.thread_handle
             .as_ref()
@@ -98,6 +100,7 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
     ///
     /// The join handle for the capture thread.
     #[must_use]
+    #[inline]
     pub fn into_thread_handle(self) -> JoinHandle<Result<(), GraphicsCaptureApiError<E>>> {
         self.thread_handle.unwrap()
     }
@@ -108,6 +111,7 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
     ///
     /// The halt handle used to pause the capture thread.
     #[must_use]
+    #[inline]
     pub fn halt_handle(&self) -> Arc<AtomicBool> {
         self.halt_handle.clone()
     }
@@ -118,6 +122,7 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
     ///
     /// The callback struct used to call struct methods directly.
     #[must_use]
+    #[inline]
     pub fn callback(&self) -> Arc<Mutex<T>> {
         self.callback.clone()
     }
@@ -127,6 +132,7 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
     /// # Returns
     ///
     /// `Ok(())` if the capturing thread stops successfully, an error otherwise.
+    #[inline]
     pub fn wait(mut self) -> Result<(), CaptureControlError<E>> {
         if let Some(thread_handle) = self.thread_handle.take() {
             match thread_handle.join() {
@@ -147,6 +153,7 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
     /// # Returns
     ///
     /// `Ok(())` if the capture thread stops successfully, an error otherwise.
+    #[inline]
     pub fn stop(mut self) -> Result<(), CaptureControlError<E>> {
         self.halt_handle.store(true, atomic::Ordering::Relaxed);
 
@@ -226,6 +233,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
     /// # Returns
     ///
     /// Returns `Ok(())` if the capture was successful, otherwise returns an error of type `GraphicsCaptureApiError`.
+    #[inline]
     fn start<T: TryInto<GraphicsCaptureItem>>(
         settings: Settings<Self::Flags, T>,
     ) -> Result<(), GraphicsCaptureApiError<Self::Error>>
@@ -332,6 +340,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
     /// # Returns
     ///
     /// Returns `Ok(CaptureControl)` if the capture was successful, otherwise returns an error of type `GraphicsCaptureApiError`.
+    #[inline]
     fn start_free_threaded<T: TryInto<GraphicsCaptureItem> + Send + 'static>(
         settings: Settings<Self::Flags, T>,
     ) -> Result<CaptureControl<Self, Self::Error>, GraphicsCaptureApiError<Self::Error>>
@@ -499,6 +508,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
     /// # Returns
     ///
     /// Returns `Ok(())` if the handler execution was successful, otherwise returns an error of type `Self::Error`.
+    #[inline]
     fn on_closed(&mut self) -> Result<(), Self::Error> {
         Ok(())
     }

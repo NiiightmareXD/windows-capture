@@ -33,6 +33,8 @@ pub struct NativeCaptureControl {
 }
 
 impl NativeCaptureControl {
+    #[must_use]
+    #[inline]
     const fn new(
         capture_control: CaptureControl<InnerNativeWindowsCapture, InnerNativeWindowsCaptureError>,
     ) -> Self {
@@ -45,12 +47,14 @@ impl NativeCaptureControl {
 #[pymethods]
 impl NativeCaptureControl {
     #[must_use]
+    #[inline]
     pub fn is_finished(&self) -> bool {
         self.capture_control
             .as_ref()
             .map_or(true, CaptureControl::is_finished)
     }
 
+    #[inline]
     pub fn wait(&mut self, py: Python) -> PyResult<()> {
         // But Honestly WTF Is This? You Know How Much Time It Took Me To Debug This?
         // Just Why? Who Decided This BS Threading Shit?
@@ -83,6 +87,7 @@ impl NativeCaptureControl {
         Ok(())
     }
 
+    #[inline]
     pub fn stop(&mut self, py: Python) -> PyResult<()> {
         // But Honestly WTF Is This? You Know How Much Time It Took Me To Debug This?
         // Just Why? Who TF Decided This BS Threading Shit?
@@ -131,6 +136,7 @@ pub struct NativeWindowsCapture {
 impl NativeWindowsCapture {
     #[new]
     #[pyo3(signature = (on_frame_arrived_callback, on_closed, cursor_capture=None, draw_border=None, monitor_index=None, window_name=None))]
+    #[inline]
     pub fn new(
         on_frame_arrived_callback: PyObject,
         on_closed: PyObject,
@@ -172,6 +178,7 @@ impl NativeWindowsCapture {
     }
 
     /// Start Capture
+    #[inline]
     pub fn start(&mut self) -> PyResult<()> {
         if self.window_name.is_some() {
             let window = match Window::from_contains_name(self.window_name.as_ref().unwrap()) {
@@ -255,6 +262,7 @@ impl NativeWindowsCapture {
     }
 
     /// Start Capture On A Dedicated Thread
+    #[inline]
     pub fn start_free_threaded(&mut self) -> PyResult<NativeCaptureControl> {
         let capture_control = if self.window_name.is_some() {
             let window = match Window::from_contains_name(self.window_name.as_ref().unwrap()) {
@@ -359,6 +367,7 @@ impl GraphicsCaptureApiHandler for InnerNativeWindowsCapture {
     type Flags = (Arc<PyObject>, Arc<PyObject>);
     type Error = InnerNativeWindowsCaptureError;
 
+    #[inline]
     fn new((on_frame_arrived_callback, on_closed): Self::Flags) -> Result<Self, Self::Error> {
         Ok(Self {
             on_frame_arrived_callback,
@@ -366,6 +375,7 @@ impl GraphicsCaptureApiHandler for InnerNativeWindowsCapture {
         })
     }
 
+    #[inline]
     fn on_frame_arrived(
         &mut self,
         frame: &mut Frame,
@@ -411,6 +421,7 @@ impl GraphicsCaptureApiHandler for InnerNativeWindowsCapture {
         Ok(())
     }
 
+    #[inline]
     fn on_closed(&mut self) -> Result<(), Self::Error> {
         Python::with_gil(|py| self.on_closed.call0(py))
             .map_err(InnerNativeWindowsCaptureError::PythonError)?;

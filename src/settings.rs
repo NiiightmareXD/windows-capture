@@ -8,6 +8,8 @@ pub enum ColorFormat {
 }
 
 impl Default for ColorFormat {
+    #[must_use]
+    #[inline]
     fn default() -> Self {
         Self::Rgba8
     }
@@ -52,6 +54,8 @@ impl<Flags, T: TryInto<GraphicsCaptureItem>> Settings<Flags, T> {
     /// * `draw_border` - Whether to draw a border around the captured region or not.
     /// * `color_format` - The desired color format for the captured frame.
     /// * `flags` - Additional flags for the capture settings that will be passed to user defined `new` function.
+    #[must_use]
+    #[inline]
     pub const fn new(
         item: T,
         cursor_capture: CursorCaptureSettings,

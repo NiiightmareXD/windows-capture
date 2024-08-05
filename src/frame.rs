@@ -88,6 +88,7 @@ impl<'a> Frame<'a> {
     /// A new Frame instance.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
+    #[inline]
     pub fn new(
         d3d_device: &'a ID3D11Device,
         frame_surface: IDirect3DSurface,
@@ -118,6 +119,7 @@ impl<'a> Frame<'a> {
     ///
     /// The width of the frame.
     #[must_use]
+    #[inline]
     pub const fn width(&self) -> u32 {
         self.width
     }
@@ -128,6 +130,7 @@ impl<'a> Frame<'a> {
     ///
     /// The height of the frame.
     #[must_use]
+    #[inline]
     pub const fn height(&self) -> u32 {
         self.height
     }
@@ -138,8 +141,20 @@ impl<'a> Frame<'a> {
     ///
     /// The time of the frame.
     #[must_use]
+    #[inline]
     pub const fn timespan(&self) -> TimeSpan {
         self.time
+    }
+
+    /// Get the color format of the frame.
+    ///
+    /// # Returns
+    ///
+    /// The color format of the frame.
+    #[must_use]
+    #[inline]
+    pub const fn color_format(&self) -> ColorFormat {
+        self.color_format
     }
 
     /// Get the raw surface of the frame.
@@ -152,6 +167,7 @@ impl<'a> Frame<'a> {
     ///
     /// This method is unsafe because it returns a raw pointer to the IDirect3DSurface.
     #[must_use]
+    #[inline]
     pub unsafe fn as_raw_surface(&self) -> IDirect3DSurface {
         self.frame_surface.clone()
     }
@@ -161,6 +177,7 @@ impl<'a> Frame<'a> {
     /// # Returns
     ///
     /// The ID3D11Texture2D representing the raw texture of the frame.
+    #[inline]
     pub fn texture(&self) -> Result<ID3D11Texture2D, Error> {
         // Texture Settings
         let texture_desc = D3D11_TEXTURE2D_DESC {
@@ -185,9 +202,9 @@ impl<'a> Frame<'a> {
             self.d3d_device
                 .CreateTexture2D(&texture_desc, None, Some(&mut texture))?;
         };
-        
+
         let texture = texture.unwrap();
-        
+
         // Copy the real texture to copy texture
         unsafe {
             self.context.CopyResource(&texture, &self.frame_texture);
@@ -201,6 +218,7 @@ impl<'a> Frame<'a> {
     /// # Returns
     ///
     /// The FrameBuffer containing the frame data.
+    #[inline]
     pub fn buffer(&mut self) -> Result<FrameBuffer, Error> {
         let texture = self.texture()?;
 
@@ -250,6 +268,7 @@ impl<'a> Frame<'a> {
     /// # Returns
     ///
     /// The FrameBuffer containing the cropped frame data.
+    #[inline]
     pub fn buffer_crop(
         &mut self,
         start_width: u32,
@@ -357,6 +376,7 @@ impl<'a> Frame<'a> {
     /// # Returns
     ///
     /// An empty Result if successful, or an Error if there was an issue saving the image.
+    #[inline]
     pub fn save_as_image<T: AsRef<Path>>(
         &mut self,
         path: T,
@@ -405,6 +425,7 @@ impl<'a> FrameBuffer<'a> {
     ///
     /// A new `FrameBuffer` instance.
     #[must_use]
+    #[inline]
     pub fn new(
         raw_buffer: &'a mut [u8],
         buffer: &'a mut Vec<u8>,
@@ -427,36 +448,42 @@ impl<'a> FrameBuffer<'a> {
 
     /// Get the width of the frame buffer.
     #[must_use]
+    #[inline]
     pub const fn width(&self) -> u32 {
         self.width
     }
 
     /// Get the height of the frame buffer.
     #[must_use]
+    #[inline]
     pub const fn height(&self) -> u32 {
         self.height
     }
 
     /// Get the row pitch of the frame buffer.
     #[must_use]
+    #[inline]
     pub const fn row_pitch(&self) -> u32 {
         self.row_pitch
     }
 
     /// Get the depth pitch of the frame buffer.
     #[must_use]
+    #[inline]
     pub const fn depth_pitch(&self) -> u32 {
         self.depth_pitch
     }
 
     /// Check if the buffer has padding.
     #[must_use]
+    #[inline]
     pub const fn has_padding(&self) -> bool {
         self.width * 4 != self.row_pitch
     }
 
     /// Get the raw pixel data with possible padding.
     #[must_use]
+    #[inline]
     pub fn as_raw_buffer(&mut self) -> &mut [u8] {
         self.raw_buffer
     }
@@ -466,6 +493,7 @@ impl<'a> FrameBuffer<'a> {
     /// # Returns
     ///
     /// A mutable reference to the buffer containing pixel data without padding.
+    #[inline]
     pub fn as_raw_nopadding_buffer(&mut self) -> Result<&mut [u8], Error> {
         if !self.has_padding() {
             return Ok(self.raw_buffer);
@@ -510,6 +538,7 @@ impl<'a> FrameBuffer<'a> {
     /// # Returns
     ///
     /// An `Ok` result if the image is successfully saved, or an `Err` result if there was an error.
+    #[inline]
     pub fn save_as_image<T: AsRef<Path>>(
         &mut self,
         path: T,

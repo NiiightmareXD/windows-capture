@@ -57,6 +57,7 @@ impl Window {
     /// # Errors
     ///
     /// Returns an `Error::NoActiveWindow` if there is no active window.
+    #[inline]
     pub fn foreground() -> Result<Self, Error> {
         let window = unsafe { GetForegroundWindow() };
 
@@ -76,6 +77,7 @@ impl Window {
     /// # Errors
     ///
     /// Returns an `Error::NotFound` if the window is not found.
+    #[inline]
     pub fn from_name(title: &str) -> Result<Self, Error> {
         let hstring_title = HSTRING::from(title);
         let window = unsafe { FindWindowW(None, &hstring_title)? };
@@ -96,6 +98,7 @@ impl Window {
     /// # Errors
     ///
     /// Returns an `Error::NotFound` if no window with a matching name substring is found.
+    #[inline]
     pub fn from_contains_name(title: &str) -> Result<Self, Error> {
         let windows = Self::enumerate()?;
 
@@ -115,6 +118,7 @@ impl Window {
     /// # Errors
     ///
     /// Returns an `Error` if there is an error retrieving the window title.
+    #[inline]
     pub fn title(&self) -> Result<String, Error> {
         let len = unsafe { GetWindowTextLengthW(self.window) };
 
@@ -142,6 +146,7 @@ impl Window {
     ///
     /// Returns `None` if the window doesn't intersect with any monitor.
     #[must_use]
+    #[inline]
     pub fn monitor(&self) -> Option<Monitor> {
         let window = self.window;
 
@@ -160,6 +165,7 @@ impl Window {
     ///
     /// Returns `true` if the window is valid, `false` otherwise.
     #[must_use]
+    #[inline]
     pub fn is_valid(&self) -> bool {
         if !unsafe { IsWindowVisible(self.window).as_bool() } {
             return false;
@@ -195,6 +201,7 @@ impl Window {
     /// # Errors
     ///
     /// Returns an `Error` if there is an error enumerating the windows.
+    #[inline]
     pub fn enumerate() -> Result<Vec<Self>, Error> {
         let mut windows: Vec<Self> = Vec::new();
 
@@ -216,17 +223,20 @@ impl Window {
     ///
     /// * `hwnd` - The raw HWND.
     #[must_use]
+    #[inline]
     pub const fn from_raw_hwnd(hwnd: *mut std::ffi::c_void) -> Self {
         Self { window: HWND(hwnd) }
     }
 
     /// Returns the raw HWND of the window.
     #[must_use]
+    #[inline]
     pub const fn as_raw_hwnd(&self) -> *mut std::ffi::c_void {
         self.window.0
     }
 
     // Callback used for enumerating all windows.
+    #[inline]
     unsafe extern "system" fn enum_windows_callback(window: HWND, vec: LPARAM) -> BOOL {
         let windows = &mut *(vec.0 as *mut Vec<Self>);
 
@@ -242,6 +252,7 @@ impl Window {
 impl TryFrom<Window> for GraphicsCaptureItem {
     type Error = Error;
 
+    #[inline]
     fn try_from(value: Window) -> Result<Self, Self::Error> {
         let window = HWND(value.as_raw_hwnd());
 

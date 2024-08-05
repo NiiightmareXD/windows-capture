@@ -68,6 +68,8 @@ impl ImageEncoder {
     /// # Returns
     ///
     /// A new `ImageEncoder` instance.
+    #[must_use]
+    #[inline]
     pub const fn new(format: ImageFormat, color_format: ColorFormat) -> Self {
         Self {
             format,
@@ -90,6 +92,7 @@ impl ImageEncoder {
     /// # Errors
     ///
     /// Returns an `Error` if the encoding fails or if the color format is unsupported.
+    #[inline]
     pub fn encode(
         &self,
         image_buffer: &[u8],
@@ -210,6 +213,7 @@ impl VideoEncoder {
     ///
     /// Returns a `Result` containing the `VideoEncoder` instance if successful, or a
     /// `VideoEncoderError` if an error occurs.
+    #[inline]
     pub fn new<P: AsRef<Path>>(
         encoder_type: VideoEncoderType,
         encoder_quality: VideoEncoderQuality,
@@ -240,12 +244,8 @@ impl VideoEncoder {
                 MediaEncodingProfile::CreateVp9(VideoEncodingQuality(encoder_quality as i32))?
             }
         };
-        media_encoding_profile
-            .Video()?
-            .SetWidth(width)?;
-        media_encoding_profile
-            .Video()?
-            .SetHeight(height)?;
+        media_encoding_profile.Video()?.SetWidth(width)?;
+        media_encoding_profile.Video()?.SetHeight(height)?;
         if fps.is_some() {
             media_encoding_profile
                 .Video()?
@@ -256,7 +256,7 @@ impl VideoEncoder {
                 .FrameRate()?
                 .SetDenominator(1)?;
         }
-    
+
         let video_encoding_properties = VideoEncodingProperties::CreateUncompressed(
             &MediaEncodingSubtypes::Bgra8()?,
             width,
@@ -402,6 +402,7 @@ impl VideoEncoder {
     ///
     /// Returns a `Result` containing the `VideoEncoder` instance if successful, or a
     /// `VideoEncoderError` if an error occurs.
+    #[inline]
     pub fn new_from_stream<P: AsRef<Path>>(
         encoder_type: VideoEncoderType,
         encoder_quality: VideoEncoderQuality,
@@ -562,6 +563,7 @@ impl VideoEncoder {
     ///
     /// Returns `Ok(())` if the frame is successfully sent for encoding, or a `VideoEncoderError`
     /// if an error occurs.
+    #[inline]
     pub fn send_frame(&mut self, frame: &mut Frame) -> Result<(), VideoEncoderError> {
         let timespan = match self.first_timespan {
             Some(timespan) => TimeSpan {
@@ -608,6 +610,7 @@ impl VideoEncoder {
     ///
     /// Returns `Ok(())` if the frame is successfully sent for encoding, or a `VideoEncoderError`
     /// if an error occurs.
+    #[inline]
     pub fn send_frame_buffer(
         &mut self,
         buffer: &[u8],
@@ -655,6 +658,7 @@ impl VideoEncoder {
     ///
     /// Returns `Ok(())` if the encoding is successfully finished, or a `VideoEncoderError` if an
     /// error occurs.
+    #[inline]
     pub fn finish(mut self) -> Result<(), VideoEncoderError> {
         self.frame_sender.send(None)?;
 
@@ -673,6 +677,7 @@ impl VideoEncoder {
 }
 
 impl Drop for VideoEncoder {
+    #[inline]
     fn drop(&mut self) {
         let _ = self.frame_sender.send(None);
 

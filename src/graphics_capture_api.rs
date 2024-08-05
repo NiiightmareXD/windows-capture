@@ -60,11 +60,13 @@ impl InternalCaptureControl {
     ///
     /// A new instance of `InternalCaptureControl`.
     #[must_use]
+    #[inline]
     pub fn new(stop: Arc<AtomicBool>) -> Self {
         Self { stop }
     }
 
     /// Gracefully stop the capture thread.
+    #[inline]
     pub fn stop(self) {
         self.stop.store(true, atomic::Ordering::Relaxed);
     }
@@ -110,6 +112,7 @@ impl GraphicsCaptureApi {
     /// # Returns
     ///
     /// Returns a `Result` containing the new `GraphicsCaptureApi` struct if successful, or an `Error` if an error occurred.
+    #[inline]
     pub fn new<
         T: GraphicsCaptureApiHandler<Error = E> + Send + 'static,
         E: Send + Sync + 'static,
@@ -340,6 +343,7 @@ impl GraphicsCaptureApi {
     /// # Returns
     ///
     /// Returns `Ok(())` if the capture started successfully, or an `Error` if an error occurred.
+    #[inline]
     pub fn start_capture(&mut self) -> Result<(), Error> {
         if self.active {
             return Err(Error::AlreadyStarted);
@@ -352,6 +356,7 @@ impl GraphicsCaptureApi {
     }
 
     /// Stop the capture.
+    #[inline]
     pub fn stop_capture(mut self) {
         if let Some(frame_pool) = self.frame_pool.take() {
             frame_pool
@@ -376,6 +381,7 @@ impl GraphicsCaptureApi {
     ///
     /// Returns an `Arc<AtomicBool>` representing the halt handle.
     #[must_use]
+    #[inline]
     pub fn halt_handle(&self) -> Arc<AtomicBool> {
         self.halt.clone()
     }
@@ -385,6 +391,7 @@ impl GraphicsCaptureApi {
     /// # Returns
     ///
     /// Returns `Ok(true)` if the API is supported, `Ok(false)` if the API is not supported, or an `Error` if an error occurred.
+    #[inline]
     pub fn is_supported() -> Result<bool, Error> {
         Ok(ApiInformation::IsApiContractPresentByMajor(
             &HSTRING::from("Windows.Foundation.UniversalApiContract"),
@@ -397,6 +404,7 @@ impl GraphicsCaptureApi {
     /// # Returns
     ///
     /// Returns `true` if toggling the cursor capture is supported, `false` otherwise.
+    #[inline]
     pub fn is_cursor_settings_supported() -> Result<bool, Error> {
         Ok(ApiInformation::IsPropertyPresent(
             &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
@@ -409,6 +417,7 @@ impl GraphicsCaptureApi {
     /// # Returns
     ///
     /// Returns `true` if toggling the border capture is supported, `false` otherwise.
+    #[inline]
     pub fn is_border_settings_supported() -> Result<bool, Error> {
         Ok(ApiInformation::IsPropertyPresent(
             &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
