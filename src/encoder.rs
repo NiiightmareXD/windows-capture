@@ -254,7 +254,7 @@ impl VideoSettingsBuilder {
 }
 
 /// The `AudioSettingsSubType` enum represents the settings for the audio encoder.
-pub struct AudioSettingBuilder {
+pub struct AudioSettingsBuilder {
     bitrate: u32,
     channel_count: u32,
     sample_rate: u32,
@@ -263,7 +263,7 @@ pub struct AudioSettingBuilder {
     disabled: bool,
 }
 
-impl AudioSettingBuilder {
+impl AudioSettingsBuilder {
     pub const fn new() -> Self {
         Self {
             bitrate: 192000,
@@ -316,7 +316,7 @@ impl AudioSettingBuilder {
     }
 }
 
-impl Default for AudioSettingBuilder {
+impl Default for AudioSettingsBuilder {
     fn default() -> Self {
         Self::new()
     }
@@ -534,7 +534,7 @@ impl VideoEncoder {
     #[inline]
     pub fn new<P: AsRef<Path>>(
         video_settings: VideoSettingsBuilder,
-        audio_settings: AudioSettingBuilder,
+        audio_settings: AudioSettingsBuilder,
         container_settings: ContainerSettingsBuilder,
         path: P,
     ) -> Result<Self, VideoEncoderError> {
@@ -762,7 +762,7 @@ impl VideoEncoder {
     #[inline]
     pub fn new_from_stream<P: AsRef<Path>>(
         video_settings: VideoSettingsBuilder,
-        audio_settings: AudioSettingBuilder,
+        audio_settings: AudioSettingsBuilder,
         container_settings: ContainerSettingsBuilder,
         stream: IRandomAccessStream,
     ) -> Result<Self, VideoEncoderError> {
