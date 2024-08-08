@@ -83,7 +83,7 @@ pub fn create_d3d_device() -> Result<(ID3D11Device, ID3D11DeviceContext), Error>
         )?;
     };
 
-    if feature_level != D3D_FEATURE_LEVEL_11_1 {
+    if feature_level.0 < D3D_FEATURE_LEVEL_11_0.0 {
         return Err(Error::FeatureLevelNotSatisfied);
     }
 
