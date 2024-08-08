@@ -26,7 +26,7 @@ Add this library to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-windows-capture = "1.2.2"
+windows-capture = "1.3.2"
 ```
 or run this command
 
@@ -44,7 +44,7 @@ use std::{
 
 use windows_capture::{
     capture::GraphicsCaptureApiHandler,
-    encoder::{VideoEncoder, VideoEncoderQuality, VideoEncoderType},
+    encoder::{AudioSettingBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder},
     frame::Frame,
     graphics_capture_api::InternalCaptureControl,
     monitor::Monitor,
@@ -71,12 +71,10 @@ impl GraphicsCaptureApiHandler for Capture {
         println!("Got The Flag: {message}");
 
         let encoder = VideoEncoder::new(
-            VideoEncoderType::Hevc,
-            VideoEncoderQuality::HD1080p,
-            1920,
-            1080,
+            VideoSettingsBuilder::new(1920, 1080),
+            AudioSettingBuilder::default().disabled(true),
+            ContainerSettingsBuilder::default(),
             "video.mp4",
-            Some(30),
         )?;
 
         Ok(Self {
