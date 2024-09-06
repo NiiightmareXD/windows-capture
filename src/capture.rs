@@ -207,11 +207,11 @@ pub enum GraphicsCaptureApiError<E> {
     FailedToSetDispatcherQueueCompletedHandler,
     #[error("Failed to convert item to GraphicsCaptureItem")]
     ItemConvertFailed,
-    #[error("Graphics capture error")]
+    #[error("Graphics capture error: {0}")]
     GraphicsCaptureApiError(graphics_capture_api::Error),
-    #[error("New handler error")]
+    #[error("New handler error: {0}")]
     NewHandlerError(E),
-    #[error("Frame handler error")]
+    #[error("Frame handler error: {0}")]
     FrameHandlerError(E),
 }
 

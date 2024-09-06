@@ -148,9 +148,9 @@ impl ImageEncoder {
 pub enum VideoEncoderError {
     #[error("Windows API Error: {0}")]
     WindowsError(#[from] windows::core::Error),
-    #[error("Frame send error")]
+    #[error("Frame send error: {0}")]
     FrameSendError(#[from] mpsc::SendError<Option<(VideoEncoderSource, TimeSpan)>>),
-    #[error("Audio send error")]
+    #[error("Audio send error: {0}")]
     AudioSendError(#[from] mpsc::SendError<Option<(AudioEncoderSource, TimeSpan)>>),
     #[error("Video is disabled")]
     VideoDisabled,

@@ -357,9 +357,9 @@ struct InnerNativeWindowsCapture {
 
 #[derive(thiserror::Error, Debug)]
 pub enum InnerNativeWindowsCaptureError {
-    #[error("Python Callback Error")]
+    #[error("Python Callback Error: {0}")]
     PythonError(pyo3::PyErr),
-    #[error("Frame Process Error")]
+    #[error("Frame Process Error: {0}")]
     FrameProcessError(frame::Error),
 }
 
