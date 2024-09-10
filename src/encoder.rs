@@ -760,7 +760,7 @@ impl VideoEncoder {
     /// Returns a `Result` containing the `VideoEncoder` instance if successful, or a
     /// `VideoEncoderError` if an error occurs.
     #[inline]
-    pub fn new_from_stream<P: AsRef<Path>>(
+    pub fn new_from_stream(
         video_settings: VideoSettingsBuilder,
         audio_settings: AudioSettingsBuilder,
         container_settings: ContainerSettingsBuilder,
