@@ -192,8 +192,8 @@ impl NativeWindowsCapture {
 
             let settings = Settings::new(
                 window,
-                self.cursor_capture.clone(),
-                self.draw_border.clone(),
+                self.cursor_capture,
+                self.draw_border,
                 ColorFormat::Bgra8,
                 (
                     self.on_frame_arrived_callback.clone(),
@@ -230,8 +230,8 @@ impl NativeWindowsCapture {
 
             let settings = Settings::new(
                 monitor,
-                self.cursor_capture.clone(),
-                self.draw_border.clone(),
+                self.cursor_capture,
+                self.draw_border,
                 ColorFormat::Bgra8,
                 (
                     self.on_frame_arrived_callback.clone(),
@@ -276,8 +276,8 @@ impl NativeWindowsCapture {
 
             let settings = Settings::new(
                 window,
-                self.cursor_capture.clone(),
-                self.draw_border.clone(),
+                self.cursor_capture,
+                self.draw_border,
                 ColorFormat::Bgra8,
                 (
                     self.on_frame_arrived_callback.clone(),
@@ -316,8 +316,8 @@ impl NativeWindowsCapture {
 
             let settings = Settings::new(
                 monitor,
-                self.cursor_capture.clone(),
-                self.draw_border.clone(),
+                self.cursor_capture,
+                self.draw_border,
                 ColorFormat::Bgra8,
                 (
                     self.on_frame_arrived_callback.clone(),

@@ -2,10 +2,8 @@
 
 [Licence]: https://img.shields.io/crates/l/windows-capture
 [Licence URL]: https://github.com/NiiightmareXD/windows-capture/blob/main/LICENCE
-
 [Build Status]: https://img.shields.io/github/actions/workflow/status/NiiightmareXD/windows-capture/rust.yml
 [repository]: https://github.com/NiiightmareXD/windows-capture
-
 [Latest Version]: https://img.shields.io/crates/v/windows-capture
 [crates.io]: https://crates.io/crates/windows-capture
 
@@ -26,8 +24,9 @@ Add this library to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-windows-capture = "1.3.5"
+windows-capture = "1.3.6"
 ```
+
 or run this command
 
 ```
