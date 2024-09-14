@@ -22,6 +22,8 @@ class Frame:
         Width Of The Frame
     height : int
         Height Of The Frame
+    timespan : int
+        Timespan Of The Frame
 
     Methods
     -------
@@ -35,11 +37,12 @@ class Frame:
         Converts The self.frame_buffer Pixel Type To Bgr Instead Of Bgra
     """
 
-    def __init__(self, frame_buffer: numpy.ndarray, width: int, height: int) -> None:
+    def __init__(self, frame_buffer: numpy.ndarray, width: int, height: int, timespan: int) -> None:
         """Constructs All The Necessary Attributes For The Frame Object"""
         self.frame_buffer = frame_buffer
         self.width = width
         self.height = height
+        self.timespan = timespan
 
     def save_as_image(self, path: str) -> None:
         """Save The Frame As An Image To The Specified Path"""
@@ -49,7 +52,7 @@ class Frame:
         """Converts The self.frame_buffer Pixel Type To Bgr Instead Of Bgra"""
         bgr_frame_buffer = self.frame_buffer[:, :, :3]
 
-        return Frame(bgr_frame_buffer, self.width, self.height)
+        return Frame(bgr_frame_buffer, self.width, self.height, self.timespan)
 
     def crop(
         self, start_width: int, start_height: int, end_width: int, end_height: int
@@ -60,7 +63,7 @@ class Frame:
         ]
 
         return Frame(
-            cropped_frame_buffer, end_width - start_width, end_height - start_height
+            cropped_frame_buffer, end_width - start_width, end_height - start_height, self.timespan
         )
 
 
@@ -223,6 +226,7 @@ class WindowsCapture:
         width: int,
         height: int,
         stop_list: list,
+        timespan: int,
     ) -> None:
         """This Method Is Called Before The on_frame_arrived Callback Function To
         Prepare Data"""
@@ -236,7 +240,7 @@ class WindowsCapture:
                     shape=(height, width, 4),
                 )
 
-                frame = Frame(ndarray, width, height)
+                frame = Frame(ndarray, width, height, timespan)
                 self.frame_handler(frame, internal_capture_control)
             else:
                 ndarray = numpy.ctypeslib.as_array(
@@ -244,7 +248,7 @@ class WindowsCapture:
                     shape=(height, row_pitch),
                 )[:, : width * 4].reshape(height, width, 4)
 
-                frame = Frame(ndarray, width, height)
+                frame = Frame(ndarray, width, height, timespan)
                 self.frame_handler(frame, internal_capture_control)
 
                 self.frame_handler(
