@@ -132,14 +132,6 @@ struct Cli {
     #[arg(long, default_value = "default")]
     draw_border: String,
 
-    /// Video width
-    #[arg(long, default_value_t = 1920)]
-    width: u32,
-
-    /// Video height
-    #[arg(long, default_value_t = 1080)]
-    height: u32,
-
     /// Output file path
     #[arg(long, default_value = "video.mp4")]
     path: String,
@@ -207,16 +199,25 @@ fn main() {
         .expect("Error setting Ctrl-C handler");
     }
 
-    let capture_settings = CaptureSettings {
-        stop_flag: stop_flag.clone(),
-        width: cli.width,
-        height: cli.height,
-        path: cli.path.clone(),
-    };
-
     if let Some(window_name) = cli.window_name {
         let capture_item =
             Window::from_contains_name(&window_name).expect("Window not found!");
+
+        // Automatically detect window's width and height
+        let rect = capture_item.rect().expect("Failed to get window rect");
+        let width = (rect.right - rect.left) as u32;
+        let height = (rect.bottom - rect.top) as u32;
+
+        let capture_settings = CaptureSettings {
+            stop_flag: stop_flag.clone(),
+            width,
+            height,
+            path: cli.path.clone(),
+        };
+
+        println!("Window title: {}", window_name);
+        println!("Window size: {}x{}", width, height);
+
         start_capture(
             capture_item,
             cursor_capture,
@@ -226,6 +227,21 @@ fn main() {
     } else if let Some(index) = cli.monitor_index {
         let capture_item =
             Monitor::from_index(usize::try_from(index).unwrap()).expect("Monitor not found!");
+
+        // Automatically detect monitor's width and height
+        let width = capture_item.width().expect("Failed to get monitor width");
+        let height = capture_item.height().expect("Failed to get monitor height");
+
+        let capture_settings = CaptureSettings {
+            stop_flag: stop_flag.clone(),
+            width,
+            height,
+            path: cli.path.clone(),
+        };
+
+        println!("Monitor index: {}", index);
+        println!("Monitor size: {}x{}", width, height);
+
         start_capture(
             capture_item,
             cursor_capture,
