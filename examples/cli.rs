@@ -200,6 +200,7 @@ fn main() {
     }
 
     if let Some(window_name) = cli.window_name {
+        // may use Window::foreground() instead
         let capture_item =
             Window::from_contains_name(&window_name).expect("Window not found!");
 
@@ -225,6 +226,7 @@ fn main() {
             capture_settings,
         );
     } else if let Some(index) = cli.monitor_index {
+        // may use Monitor::primary() instead
         let capture_item =
             Monitor::from_index(usize::try_from(index).unwrap()).expect("Monitor not found!");
 
