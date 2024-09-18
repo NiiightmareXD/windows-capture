@@ -216,7 +216,7 @@ fn main() {
             path: cli.path.clone(),
         };
 
-        println!("Window title: {}", window_name);
+        println!("Window title: {}", capture_item.title().expect("Failed to get window title"));
         println!("Window size: {}x{}", width, height);
 
         start_capture(
