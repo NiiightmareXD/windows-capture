@@ -29,6 +29,8 @@ struct CaptureSettings {
     width: u32,
     height: u32,
     path: String,
+    bitrate: u32,
+    frame_rate: u32,
 }
 
 // This struct will be used to handle the capture events.
@@ -56,8 +58,12 @@ impl GraphicsCaptureApiHandler for Capture {
     fn new(settings: Self::Flags) -> Result<Self, Self::Error> {
         println!("Capture started.");
 
+        let video_settings = VideoSettingsBuilder::new(settings.width, settings.height)
+            .bitrate(settings.bitrate)
+            .frame_rate(settings.frame_rate);
+
         let encoder = VideoEncoder::new(
-            VideoSettingsBuilder::new(settings.width, settings.height),
+            video_settings,
             AudioSettingsBuilder::default().disabled(true),
             ContainerSettingsBuilder::default(),
             &settings.path,
@@ -146,6 +152,14 @@ struct Cli {
     /// Output file path
     #[arg(long, default_value = "video.mp4")]
     path: String,
+
+    /// Video bitrate in bits per second
+    #[arg(long, default_value_t = 15_000_000)]
+    bitrate: u32,
+
+    /// Video frame rate
+    #[arg(long, default_value_t = 60)]
+    frame_rate: u32,
 }
 
 fn parse_cursor_capture(s: &str) -> CursorCaptureSettings {
@@ -225,6 +239,8 @@ fn main() {
             width,
             height,
             path: cli.path.clone(),
+            bitrate: cli.bitrate,
+            frame_rate: cli.frame_rate,
         };
 
         println!(
@@ -253,6 +269,8 @@ fn main() {
             width,
             height,
             path: cli.path.clone(),
+            bitrate: cli.bitrate,
+            frame_rate: cli.frame_rate,
         };
 
         println!("Monitor index: {}", index);
