@@ -4,7 +4,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use clap::Parser;
@@ -37,8 +37,10 @@ struct Capture {
     encoder: Option<VideoEncoder>,
     // To measure the time the capture has been running
     start: Instant,
-    // To count the number of frames captured
-    frame_count: u64,
+    // To count the number of frames captured since last reset
+    frame_count_since_reset: u64,
+    // To store the time when frame count was last reset
+    last_reset: Instant,
     // Capture settings including stop flag and video settings
     settings: CaptureSettings,
 }
@@ -64,7 +66,8 @@ impl GraphicsCaptureApiHandler for Capture {
         Ok(Self {
             encoder: Some(encoder),
             start: Instant::now(),
-            frame_count: 0,
+            frame_count_since_reset: 0,
+            last_reset: Instant::now(),
             settings,
         })
     }
@@ -75,14 +78,16 @@ impl GraphicsCaptureApiHandler for Capture {
         frame: &mut Frame,
         capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
-        self.frame_count += 1;
+        self.frame_count_since_reset += 1;
 
-        let elapsed_secs = self.start.elapsed().as_secs_f64();
-        let fps = self.frame_count as f64 / elapsed_secs;
-
+        // Calculate elapsed time since last reset
+        let elapsed_since_reset = self.last_reset.elapsed();
+        let fps = self.frame_count_since_reset as f64 / elapsed_since_reset.as_secs_f64();
+        // Print the FPS
         print!(
             "\rRecording for: {:.2} seconds | FPS: {:.2}",
-            elapsed_secs, fps
+            self.start.elapsed().as_secs_f64(),
+            fps
         );
         io::stdout().flush()?;
 
@@ -97,6 +102,12 @@ impl GraphicsCaptureApiHandler for Capture {
             capture_control.stop();
 
             println!("\nRecording stopped by user.");
+        }
+
+        if elapsed_since_reset >= Duration::from_secs(1) {
+            // Reset frame count and last_reset time
+            self.frame_count_since_reset = 0;
+            self.last_reset = Instant::now();
         }
 
         Ok(())
@@ -200,7 +211,7 @@ fn main() {
     }
 
     if let Some(window_name) = cli.window_name {
-        // may use Window::foreground() instead
+        // May use Window::foreground() instead
         let capture_item =
             Window::from_contains_name(&window_name).expect("Window not found!");
 
@@ -216,7 +227,10 @@ fn main() {
             path: cli.path.clone(),
         };
 
-        println!("Window title: {}", capture_item.title().expect("Failed to get window title"));
+        println!(
+            "Window title: {}",
+            capture_item.title().expect("Failed to get window title")
+        );
         println!("Window size: {}x{}", width, height);
 
         start_capture(
@@ -226,7 +240,7 @@ fn main() {
             capture_settings,
         );
     } else if let Some(index) = cli.monitor_index {
-        // may use Monitor::primary() instead
+        // May use Monitor::primary() instead
         let capture_item =
             Monitor::from_index(usize::try_from(index).unwrap()).expect("Monitor not found!");
 
