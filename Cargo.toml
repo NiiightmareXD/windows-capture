@@ -52,7 +52,7 @@ parking_lot = "0.12.3"
 rayon = "1.10.0"
 
 # Error handling
-thiserror = "1.0.63"
+thiserror = "1.0.64"
 clap = { version = "4.5.17", features = ["derive"] }
 ctrlc = "3.4.5"
 
