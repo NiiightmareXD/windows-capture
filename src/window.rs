@@ -11,8 +11,9 @@ use windows::{
         },
         UI::WindowsAndMessaging::{
             EnumChildWindows, FindWindowW, GetClientRect, GetDesktopWindow, GetForegroundWindow,
-            GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
-            IsWindowVisible, GWL_EXSTYLE, GWL_STYLE, WS_CHILD, WS_EX_TOOLWINDOW,
+            GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
+            GetWindowThreadProcessId, IsWindowVisible, GWL_EXSTYLE, GWL_STYLE, WS_CHILD,
+            WS_EX_TOOLWINDOW,
         },
     },
 };
@@ -156,6 +157,22 @@ impl Window {
             None
         } else {
             Some(Monitor::from_raw_hmonitor(monitor.0))
+        }
+    }
+
+    /// Returns the rectangle of the window in screen coordinates.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error::WindowsError` if there is an error retrieving the window rectangle.
+    #[inline]
+    pub fn rect(&self) -> Result<RECT, Error> {
+        let mut rect = RECT::default();
+        let result = unsafe { GetWindowRect(self.window, &mut rect) };
+        if result.is_ok() {
+            Ok(rect)
+        } else {
+            Err(Error::WindowsError(windows::core::Error::from_win32()))
         }
     }
 
