@@ -8,6 +8,7 @@ use std::sync::Arc;
 use ::windows_capture::{
     capture::{
         CaptureControl, CaptureControlError, GraphicsCaptureApiError, GraphicsCaptureApiHandler,
+        RawDirect3DDevice,
     },
     frame::{self, Frame},
     graphics_capture_api::InternalCaptureControl,
@@ -368,7 +369,10 @@ impl GraphicsCaptureApiHandler for InnerNativeWindowsCapture {
     type Error = InnerNativeWindowsCaptureError;
 
     #[inline]
-    fn new((on_frame_arrived_callback, on_closed): Self::Flags) -> Result<Self, Self::Error> {
+    fn new(
+        _: RawDirect3DDevice,
+        (on_frame_arrived_callback, on_closed): Self::Flags,
+    ) -> Result<Self, Self::Error> {
         Ok(Self {
             on_frame_arrived_callback,
             on_closed,

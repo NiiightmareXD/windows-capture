@@ -168,8 +168,8 @@ impl<'a> Frame<'a> {
     /// This method is unsafe because it returns a raw pointer to the IDirect3DSurface.
     #[must_use]
     #[inline]
-    pub unsafe fn as_raw_surface(&self) -> IDirect3DSurface {
-        self.frame_surface.clone()
+    pub unsafe fn as_raw_surface(&self) -> &IDirect3DSurface {
+        &self.frame_surface
     }
 
     /// Get the raw texture of the frame.
@@ -178,7 +178,17 @@ impl<'a> Frame<'a> {
     ///
     /// The ID3D11Texture2D representing the raw texture of the frame.
     #[inline]
-    pub fn texture(&self) -> Result<ID3D11Texture2D, Error> {
+    pub unsafe fn as_raw_texture(&self) -> &ID3D11Texture2D {
+        &self.frame_texture
+    }
+
+    /// Get the frame buffer.
+    ///
+    /// # Returns
+    ///
+    /// The FrameBuffer containing the frame data.
+    #[inline]
+    pub fn buffer(&mut self) -> Result<FrameBuffer, Error> {
         // Texture Settings
         let texture_desc = D3D11_TEXTURE2D_DESC {
             Width: self.width,
@@ -192,7 +202,7 @@ impl<'a> Frame<'a> {
             },
             Usage: D3D11_USAGE_STAGING,
             BindFlags: 0,
-            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32 | D3D11_CPU_ACCESS_WRITE.0 as u32,
+            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
             MiscFlags: 0,
         };
 
@@ -209,18 +219,6 @@ impl<'a> Frame<'a> {
         unsafe {
             self.context.CopyResource(&texture, &self.frame_texture);
         };
-
-        Ok(texture)
-    }
-
-    /// Get the frame buffer.
-    ///
-    /// # Returns
-    ///
-    /// The FrameBuffer containing the frame data.
-    #[inline]
-    pub fn buffer(&mut self) -> Result<FrameBuffer, Error> {
-        let texture = self.texture()?;
 
         // Map the texture to enable CPU access
         let mut mapped_resource = D3D11_MAPPED_SUBRESOURCE::default();
