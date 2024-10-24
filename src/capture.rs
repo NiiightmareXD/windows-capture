@@ -51,7 +51,7 @@ pub enum CaptureControlError<E> {
 }
 
 /// Used to control the capture session
-pub struct CaptureControl<T: GraphicsCaptureApiHandler + Send + 'static + ?Sized, E> {
+pub struct CaptureControl<T: GraphicsCaptureApiHandler + Send + 'static, E> {
     thread_handle: Option<JoinHandle<Result<(), GraphicsCaptureApiError<E>>>>,
     halt_handle: Arc<AtomicBool>,
     callback: Arc<Mutex<T>>,
@@ -71,7 +71,7 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
     /// The newly created CaptureControl struct.
     #[must_use]
     #[inline]
-    pub fn new(
+    pub const fn new(
         thread_handle: JoinHandle<Result<(), GraphicsCaptureApiError<E>>>,
         halt_handle: Arc<AtomicBool>,
         callback: Arc<Mutex<T>>,
@@ -219,8 +219,17 @@ pub enum GraphicsCaptureApiError<E> {
     FrameHandlerError(E),
 }
 
-/// A trait representing a graphics capture handler.
+/// A struct representing the context of the capture handler.
+pub struct Context<Flags> {
+    /// The flags that are gotten from the settings.
+    pub flags: Flags,
+    /// The direct3d device and context.
+    pub device: ID3D11Device,
+    /// The direct3d device context.
+    pub device_context: ID3D11DeviceContext,
+}
 
+/// A trait representing a graphics capture handler.
 pub trait GraphicsCaptureApiHandler: Sized {
     /// The type of flags used to get the values from the settings.
     type Flags;
@@ -270,15 +279,15 @@ pub trait GraphicsCaptureApiHandler: Sized {
 
         // Start capture
         let result = Arc::new(Mutex::new(None));
+
+        let ctx = Context {
+            flags: settings.flags,
+            device: d3d_device.clone(),
+            device_context: d3d_device_context.clone(),
+        };
+
         let callback = Arc::new(Mutex::new(
-            Self::new(
-                RawDirect3DDevice {
-                    device: d3d_device.clone(),
-                    context: d3d_device_context.clone(),
-                },
-                settings.flags,
-            )
-            .map_err(GraphicsCaptureApiError::NewHandlerError)?,
+            Self::new(ctx).map_err(GraphicsCaptureApiError::NewHandlerError)?,
         ));
 
         let item = settings
@@ -340,7 +349,8 @@ pub trait GraphicsCaptureApiHandler: Sized {
         unsafe { RoUninitialize() };
 
         // Check handler result
-        if let Some(e) = result.lock().take() {
+        let result = result.lock().take();
+        if let Some(e) = result {
             return Err(GraphicsCaptureApiError::FrameHandlerError(e));
         }
 
@@ -395,15 +405,15 @@ pub trait GraphicsCaptureApiHandler: Sized {
 
                 // Start capture
                 let result = Arc::new(Mutex::new(None));
+
+                let ctx = Context {
+                    flags: settings.flags,
+                    device: d3d_device.clone(),
+                    device_context: d3d_device_context.clone(),
+                };
+
                 let callback = Arc::new(Mutex::new(
-                    Self::new(
-                        RawDirect3DDevice {
-                            device: d3d_device.clone(),
-                            context: d3d_device_context.clone(),
-                        },
-                        settings.flags,
-                    )
-                    .map_err(GraphicsCaptureApiError::NewHandlerError)?,
+                    Self::new(ctx).map_err(GraphicsCaptureApiError::NewHandlerError)?,
                 ));
 
                 let item = settings
@@ -475,7 +485,8 @@ pub trait GraphicsCaptureApiHandler: Sized {
                 unsafe { RoUninitialize() };
 
                 // Check handler result
-                if let Some(e) = result.lock().take() {
+                let result = result.lock().take();
+                if let Some(e) = result {
                     return Err(GraphicsCaptureApiError::FrameHandlerError(e));
                 }
 
@@ -513,7 +524,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
     /// # Returns
     ///
     /// Returns `Ok(Self)` if the struct creation was successful, otherwise returns an error of type `Self::Error`.
-    fn new(device: RawDirect3DDevice, flags: Self::Flags) -> Result<Self, Self::Error>;
+    fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error>;
 
     /// Called every time a new frame is available.
     ///
@@ -540,10 +551,4 @@ pub trait GraphicsCaptureApiHandler: Sized {
     fn on_closed(&mut self) -> Result<(), Self::Error> {
         Ok(())
     }
-}
-
-#[derive(Clone)]
-pub struct RawDirect3DDevice {
-    pub device: ID3D11Device,
-    pub context: ID3D11DeviceContext,
 }

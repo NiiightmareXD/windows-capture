@@ -166,9 +166,10 @@ impl<'a> Frame<'a> {
     /// # Safety
     ///
     /// This method is unsafe because it returns a raw pointer to the IDirect3DSurface.
+    #[allow(clippy::missing_safety_doc)]
     #[must_use]
     #[inline]
-    pub unsafe fn as_raw_surface(&self) -> &IDirect3DSurface {
+    pub const unsafe fn as_raw_surface(&self) -> &IDirect3DSurface {
         &self.frame_surface
     }
 
@@ -177,8 +178,10 @@ impl<'a> Frame<'a> {
     /// # Returns
     ///
     /// The ID3D11Texture2D representing the raw texture of the frame.
+    #[allow(clippy::missing_safety_doc)]
+    #[must_use]
     #[inline]
-    pub unsafe fn as_raw_texture(&self) -> &ID3D11Texture2D {
+    pub const unsafe fn as_raw_texture(&self) -> &ID3D11Texture2D {
         &self.frame_texture
     }
 
@@ -492,7 +495,7 @@ impl<'a> FrameBuffer<'a> {
     ///
     /// A mutable reference to the buffer containing pixel data without padding.
     #[inline]
-    pub fn as_raw_nopadding_buffer(&mut self) -> Result<&mut [u8], Error> {
+    pub fn as_nopadding_buffer(&mut self) -> Result<&mut [u8], Error> {
         if !self.has_padding() {
             return Ok(self.raw_buffer);
         }
@@ -546,7 +549,7 @@ impl<'a> FrameBuffer<'a> {
         let height = self.height;
 
         let bytes = ImageEncoder::new(format, self.color_format).encode(
-            self.as_raw_nopadding_buffer()?,
+            self.as_nopadding_buffer()?,
             width,
             height,
         )?;

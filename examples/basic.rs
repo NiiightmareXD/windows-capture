@@ -4,7 +4,7 @@ use std::{
 };
 
 use windows_capture::{
-    capture::{GraphicsCaptureApiHandler, RawDirect3DDevice},
+    capture::{Context, GraphicsCaptureApiHandler},
     encoder::{AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder},
     frame::Frame,
     graphics_capture_api::InternalCaptureControl,
@@ -28,8 +28,8 @@ impl GraphicsCaptureApiHandler for Capture {
     type Error = Box<dyn std::error::Error + Send + Sync>;
 
     // Function that will be called to create the struct. The flags can be passed from settings.
-    fn new(_: RawDirect3DDevice, message: Self::Flags) -> Result<Self, Self::Error> {
-        println!("Got The Flag: {message}");
+    fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
+        println!("Got The Flag: {}", ctx.flags);
 
         let encoder = VideoEncoder::new(
             VideoSettingsBuilder::new(1920, 1080),

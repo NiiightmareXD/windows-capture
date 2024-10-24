@@ -10,7 +10,7 @@ use std::{
 use clap::Parser;
 
 use windows_capture::{
-    capture::{GraphicsCaptureApiHandler, RawDirect3DDevice},
+    capture::{Context, GraphicsCaptureApiHandler},
     encoder::{AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder},
     frame::Frame,
     graphics_capture_api::InternalCaptureControl,
@@ -53,18 +53,18 @@ impl GraphicsCaptureApiHandler for Capture {
     type Error = Box<dyn std::error::Error + Send + Sync>;
 
     // Function that will be called to create the struct. The flags can be passed from settings.
-    fn new(_: RawDirect3DDevice, settings: Self::Flags) -> Result<Self, Self::Error> {
+    fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
         println!("Capture started.");
 
-        let video_settings = VideoSettingsBuilder::new(settings.width, settings.height)
-            .bitrate(settings.bitrate)
-            .frame_rate(settings.frame_rate);
+        let video_settings = VideoSettingsBuilder::new(ctx.flags.width, ctx.flags.height)
+            .bitrate(ctx.flags.bitrate)
+            .frame_rate(ctx.flags.frame_rate);
 
         let encoder = VideoEncoder::new(
             video_settings,
             AudioSettingsBuilder::default().disabled(true),
             ContainerSettingsBuilder::default(),
-            &settings.path,
+            &ctx.flags.path,
         )?;
 
         Ok(Self {
@@ -72,7 +72,7 @@ impl GraphicsCaptureApiHandler for Capture {
             start: Instant::now(),
             frame_count_since_reset: 0,
             last_reset: Instant::now(),
-            settings,
+            settings: ctx.flags,
         })
     }
 

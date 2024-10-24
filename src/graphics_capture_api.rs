@@ -61,7 +61,7 @@ impl InternalCaptureControl {
     /// A new instance of `InternalCaptureControl`.
     #[must_use]
     #[inline]
-    pub fn new(stop: Arc<AtomicBool>) -> Self {
+    pub const fn new(stop: Arc<AtomicBool>) -> Self {
         Self { stop }
     }
 
@@ -101,6 +101,8 @@ impl GraphicsCaptureApi {
     ///
     /// # Arguments
     ///
+    /// * `d3d_device` - The ID3D11Device to use for the capture.
+    /// * `d3d_device_context` - The ID3D11DeviceContext to use for the capture.
     /// * `item` - The graphics capture item to capture.
     /// * `callback` - The callback handler for capturing frames.
     /// * `capture_cursor` - Optional flag to capture the cursor.
@@ -112,6 +114,7 @@ impl GraphicsCaptureApi {
     /// # Returns
     ///
     /// Returns a `Result` containing the new `GraphicsCaptureApi` struct if successful, or an `Error` if an error occurred.
+    #[allow(clippy::too_many_arguments)]
     #[inline]
     pub fn new<
         T: GraphicsCaptureApiHandler<Error = E> + Send + 'static,
@@ -175,7 +178,8 @@ impl GraphicsCaptureApi {
                 halt_closed.store(true, atomic::Ordering::Relaxed);
 
                 // Notify the struct that the capture session is closed
-                if let Err(e) = callback_closed.lock().on_closed() {
+                let callback_closed = callback_closed.lock().on_closed();
+                if let Err(e) = callback_closed {
                     *result_closed.lock() = Some(e);
                 }
 
