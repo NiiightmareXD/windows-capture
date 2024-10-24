@@ -991,7 +991,9 @@ impl VideoEncoder {
         };
 
         self.frame_sender.send(Some((
-            VideoEncoderSource::DirectX(SendDirectX::new(unsafe { frame.as_raw_surface() })),
+            VideoEncoderSource::DirectX(SendDirectX::new(unsafe {
+                frame.as_raw_surface().clone()
+            })),
             timespan,
         )))?;
 
@@ -1051,7 +1053,9 @@ impl VideoEncoder {
         };
 
         self.frame_sender.send(Some((
-            VideoEncoderSource::DirectX(SendDirectX::new(unsafe { frame.as_raw_surface() })),
+            VideoEncoderSource::DirectX(SendDirectX::new(unsafe {
+                frame.as_raw_surface().clone()
+            })),
             timespan,
         )))?;
 

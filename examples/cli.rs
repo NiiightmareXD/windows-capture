@@ -10,10 +10,8 @@ use std::{
 use clap::Parser;
 
 use windows_capture::{
-    capture::GraphicsCaptureApiHandler,
-    encoder::{
-        AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder,
-    },
+    capture::{GraphicsCaptureApiHandler, RawDirect3DDevice},
+    encoder::{AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder},
     frame::Frame,
     graphics_capture_api::InternalCaptureControl,
     monitor::Monitor,
@@ -55,7 +53,7 @@ impl GraphicsCaptureApiHandler for Capture {
     type Error = Box<dyn std::error::Error + Send + Sync>;
 
     // Function that will be called to create the struct. The flags can be passed from settings.
-    fn new(settings: Self::Flags) -> Result<Self, Self::Error> {
+    fn new(_: RawDirect3DDevice, settings: Self::Flags) -> Result<Self, Self::Error> {
         println!("Capture started.");
 
         let video_settings = VideoSettingsBuilder::new(settings.width, settings.height)
@@ -226,8 +224,7 @@ fn main() {
 
     if let Some(window_name) = cli.window_name {
         // May use Window::foreground() instead
-        let capture_item =
-            Window::from_contains_name(&window_name).expect("Window not found!");
+        let capture_item = Window::from_contains_name(&window_name).expect("Window not found!");
 
         // Automatically detect window's width and height
         let rect = capture_item.rect().expect("Failed to get window rect");
@@ -249,12 +246,7 @@ fn main() {
         );
         println!("Window size: {}x{}", width, height);
 
-        start_capture(
-            capture_item,
-            cursor_capture,
-            draw_border,
-            capture_settings,
-        );
+        start_capture(capture_item, cursor_capture, draw_border, capture_settings);
     } else if let Some(index) = cli.monitor_index {
         // May use Monitor::primary() instead
         let capture_item =
@@ -276,12 +268,7 @@ fn main() {
         println!("Monitor index: {}", index);
         println!("Monitor size: {}x{}", width, height);
 
-        start_capture(
-            capture_item,
-            cursor_capture,
-            draw_border,
-            capture_settings,
-        );
+        start_capture(capture_item, cursor_capture, draw_border, capture_settings);
     } else {
         eprintln!("Either --window-name or --monitor-index must be provided");
         std::process::exit(1);

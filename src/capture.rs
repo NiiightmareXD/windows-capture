@@ -14,6 +14,7 @@ use windows::{
     Graphics::Capture::GraphicsCaptureItem,
     Win32::{
         Foundation::{HANDLE, LPARAM, WPARAM},
+        Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext},
         System::{
             Threading::{GetCurrentThreadId, GetThreadId},
             WinRT::{
@@ -29,6 +30,7 @@ use windows::{
 };
 
 use crate::{
+    d3d11::{self, create_d3d_device},
     frame::Frame,
     graphics_capture_api::{self, GraphicsCaptureApi, InternalCaptureControl},
     settings::Settings,
@@ -207,6 +209,8 @@ pub enum GraphicsCaptureApiError<E> {
     FailedToSetDispatcherQueueCompletedHandler,
     #[error("Failed to convert item to GraphicsCaptureItem")]
     ItemConvertFailed,
+    #[error("DirectX error: {0}")]
+    DirectXError(#[from] d3d11::Error),
     #[error("Graphics capture error: {0}")]
     GraphicsCaptureApiError(graphics_capture_api::Error),
     #[error("New handler error: {0}")]
@@ -261,10 +265,20 @@ pub trait GraphicsCaptureApiHandler: Sized {
         // Get current thread ID
         let thread_id = unsafe { GetCurrentThreadId() };
 
+        // Create direct3d device and context
+        let (d3d_device, d3d_device_context) = create_d3d_device()?;
+
         // Start capture
         let result = Arc::new(Mutex::new(None));
         let callback = Arc::new(Mutex::new(
-            Self::new(settings.flags).map_err(GraphicsCaptureApiError::NewHandlerError)?,
+            Self::new(
+                RawDirect3DDevice {
+                    device: d3d_device.clone(),
+                    context: d3d_device_context.clone(),
+                },
+                settings.flags,
+            )
+            .map_err(GraphicsCaptureApiError::NewHandlerError)?,
         ));
 
         let item = settings
@@ -273,6 +287,8 @@ pub trait GraphicsCaptureApiHandler: Sized {
             .map_err(|_| GraphicsCaptureApiError::ItemConvertFailed)?;
 
         let mut capture = GraphicsCaptureApi::new(
+            d3d_device,
+            d3d_device_context,
             item,
             callback,
             settings.cursor_capture,
@@ -374,10 +390,20 @@ pub trait GraphicsCaptureApiHandler: Sized {
                 // Get current thread ID
                 let thread_id = unsafe { GetCurrentThreadId() };
 
+                // Create direct3d device and context
+                let (d3d_device, d3d_device_context) = create_d3d_device()?;
+
                 // Start capture
                 let result = Arc::new(Mutex::new(None));
                 let callback = Arc::new(Mutex::new(
-                    Self::new(settings.flags).map_err(GraphicsCaptureApiError::NewHandlerError)?,
+                    Self::new(
+                        RawDirect3DDevice {
+                            device: d3d_device.clone(),
+                            context: d3d_device_context.clone(),
+                        },
+                        settings.flags,
+                    )
+                    .map_err(GraphicsCaptureApiError::NewHandlerError)?,
                 ));
 
                 let item = settings
@@ -386,6 +412,8 @@ pub trait GraphicsCaptureApiHandler: Sized {
                     .map_err(|_| GraphicsCaptureApiError::ItemConvertFailed)?;
 
                 let mut capture = GraphicsCaptureApi::new(
+                    d3d_device,
+                    d3d_device_context,
                     item,
                     callback.clone(),
                     settings.cursor_capture,
@@ -485,7 +513,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
     /// # Returns
     ///
     /// Returns `Ok(Self)` if the struct creation was successful, otherwise returns an error of type `Self::Error`.
-    fn new(flags: Self::Flags) -> Result<Self, Self::Error>;
+    fn new(device: RawDirect3DDevice, flags: Self::Flags) -> Result<Self, Self::Error>;
 
     /// Called every time a new frame is available.
     ///
@@ -512,4 +540,10 @@ pub trait GraphicsCaptureApiHandler: Sized {
     fn on_closed(&mut self) -> Result<(), Self::Error> {
         Ok(())
     }
+}
+
+#[derive(Clone)]
+pub struct RawDirect3DDevice {
+    pub device: ID3D11Device,
+    pub context: ID3D11DeviceContext,
 }
