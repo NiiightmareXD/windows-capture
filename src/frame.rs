@@ -205,7 +205,7 @@ impl<'a> Frame<'a> {
             },
             Usage: D3D11_USAGE_STAGING,
             BindFlags: 0,
-            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32 | D3D11_CPU_ACCESS_WRITE.0 as u32,
             MiscFlags: 0,
         };
 
