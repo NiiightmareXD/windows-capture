@@ -459,7 +459,7 @@ dependencies = [
 
 [[package]]
 name = "windows-capture-python"
-version = "1.4.1"
+version = "1.4.2"
 dependencies = [
  "pyo3",
  "thiserror",
