@@ -53,7 +53,7 @@ rayon = "1.10.0"
 
 # Error handling
 thiserror = "1.0.66"
-clap = { version = "4.5.20", features = ["derive"] }
+clap = { version = "4.5.21", features = ["derive"] }
 ctrlc = "3.4.5"
 
 [package.metadata.docs.rs]
