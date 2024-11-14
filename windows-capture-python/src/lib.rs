@@ -205,17 +205,8 @@ impl NativeWindowsCapture {
             match InnerNativeWindowsCapture::start(settings) {
                 Ok(()) => (),
                 Err(e) => {
-                    if let GraphicsCaptureApiError::FrameHandlerError(
-                        InnerNativeWindowsCaptureError::PythonError(ref e),
-                    ) = e
-                    {
-                        return Err(PyException::new_err(format!(
-                            "Capture Session Threw An Exception -> {e}",
-                        )));
-                    }
-
                     return Err(PyException::new_err(format!(
-                        "Capture Session Threw An Exception -> {e}",
+                        "InnerNativeWindowsCapture::start Threw An Exception -> {e}",
                     )));
                 }
             }
@@ -243,17 +234,8 @@ impl NativeWindowsCapture {
             match InnerNativeWindowsCapture::start(settings) {
                 Ok(()) => (),
                 Err(e) => {
-                    if let GraphicsCaptureApiError::FrameHandlerError(
-                        InnerNativeWindowsCaptureError::PythonError(ref e),
-                    ) = e
-                    {
-                        return Err(PyException::new_err(format!(
-                            "Capture Session Threw An Exception -> {e}",
-                        )));
-                    }
-
                     return Err(PyException::new_err(format!(
-                        "Capture Session Threw An Exception -> {e}",
+                        "InnerNativeWindowsCapture::start Threw An Exception -> {e}",
                     )));
                 }
             }
