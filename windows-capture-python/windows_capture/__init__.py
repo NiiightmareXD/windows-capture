@@ -166,6 +166,7 @@ class WindowsCapture:
         draw_border: Optional[bool] = None,
         monitor_index: Optional[int] = None,
         window_name: Optional[str] = None,
+        window_handle: Optional[int] = None,
     ) -> None:
         """
         Constructs All The Necessary Attributes For The WindowsCapture Object
@@ -182,9 +183,17 @@ class WindowsCapture:
                 Index Of The Monitor To Capture
             window_name : str
                 Name Of The Window To Capture
+            window_handle : int
+                Handle Of The Window To Capture
         """
-        if window_name is not None:
-            monitor_index = None
+        specified_count = sum(
+            param is not None for param in [window_name, monitor_index, window_handle]
+        )
+
+        if specified_count > 1:
+            raise ValueError(
+                "You can specify only one of window_name, monitor_index, or window_handle."
+            )
 
         self.frame_handler: Optional[types.FunctionType] = None
         self.closed_handler: Optional[types.FunctionType] = None
@@ -195,6 +204,7 @@ class WindowsCapture:
             draw_border,
             monitor_index,
             window_name,
+            window_handle,
         )
 
     def start(self) -> None:
@@ -250,11 +260,6 @@ class WindowsCapture:
 
                 frame = Frame(ndarray, width, height, timespan)
                 self.frame_handler(frame, internal_capture_control)
-
-                self.frame_handler(
-                    frame,
-                    internal_capture_control,
-                )
 
         else:
             raise Exception("on_frame_arrived Event Handler Is Not Set")

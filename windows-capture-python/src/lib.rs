@@ -131,12 +131,13 @@ pub struct NativeWindowsCapture {
     draw_border: DrawBorderSettings,
     monitor_index: Option<usize>,
     window_name: Option<String>,
+    window_handle: Option<isize>,
 }
 
 #[pymethods]
 impl NativeWindowsCapture {
     #[new]
-    #[pyo3(signature = (on_frame_arrived_callback, on_closed, cursor_capture=None, draw_border=None, monitor_index=None, window_name=None))]
+    #[pyo3(signature = (on_frame_arrived_callback, on_closed, cursor_capture=None, draw_border=None, monitor_index=None, window_name=None, window_handle=None))]
     #[inline]
     pub fn new(
         on_frame_arrived_callback: PyObject,
@@ -145,15 +146,22 @@ impl NativeWindowsCapture {
         draw_border: Option<bool>,
         mut monitor_index: Option<usize>,
         window_name: Option<String>,
+        window_handle: Option<isize>,
     ) -> PyResult<Self> {
-        if window_name.is_some() && monitor_index.is_some() {
+        // Ensure only one of window_name, monitor_index, or window_handle is provided
+        if [window_name.is_some(), monitor_index.is_some(), window_handle.is_some()]
+            .iter()
+            .filter(|&&v| v)
+            .count()
+            > 1
+        {
             return Err(PyException::new_err(
-                "You Can't Specify Both The Monitor Index And The Window Name",
+                "You can only specify one of window_name, monitor_index, or window_handle.",
             ));
         }
 
-        if window_name.is_none() && monitor_index.is_none() {
-            monitor_index = Some(1);
+        if window_name.is_none() && monitor_index.is_none() && window_handle.is_none() {
+            monitor_index = Some(1); // Default to monitor index 1 if nothing is provided
         }
 
         let cursor_capture = match cursor_capture {
@@ -175,18 +183,45 @@ impl NativeWindowsCapture {
             draw_border,
             monitor_index,
             window_name,
+            window_handle,
         })
     }
 
     /// Start Capture
     #[inline]
     pub fn start(&mut self) -> PyResult<()> {
-        if self.window_name.is_some() {
-            let window = match Window::from_contains_name(self.window_name.as_ref().unwrap()) {
+        if let Some(window_handle) = self.window_handle {
+            // Use the window handle to create a Window instance
+            let window = Window::from_raw_hwnd(window_handle as *mut std::ffi::c_void);
+
+            // Create settings for the capture session
+            let settings = Settings::new(
+                window,
+                self.cursor_capture,
+                self.draw_border,
+                ColorFormat::Bgra8,
+                (
+                    self.on_frame_arrived_callback.clone(),
+                    self.on_closed.clone(),
+                ),
+            );
+
+            // Start the capture session
+            match InnerNativeWindowsCapture::start(settings) {
+                Ok(()) => (),
+                Err(e) => {
+                    return Err(PyException::new_err(format!(
+                        "InnerNativeWindowsCapture::start failed -> {e}",
+                    )));
+                }
+            }
+        } else if let Some(window_name) = &self.window_name {
+            // Capture using window_name
+            let window = match Window::from_contains_name(window_name) {
                 Ok(window) => window,
                 Err(e) => {
                     return Err(PyException::new_err(format!(
-                        "Failed To Find Window -> {e}"
+                        "Failed to find window by name -> {e}"
                     )));
                 }
             };
@@ -206,16 +241,17 @@ impl NativeWindowsCapture {
                 Ok(()) => (),
                 Err(e) => {
                     return Err(PyException::new_err(format!(
-                        "InnerNativeWindowsCapture::start Threw An Exception -> {e}",
+                        "InnerNativeWindowsCapture::start failed -> {e}",
                     )));
                 }
             }
-        } else {
-            let monitor = match Monitor::from_index(self.monitor_index.unwrap()) {
+        } else if let Some(monitor_index) = self.monitor_index {
+            // Capture using monitor_index
+            let monitor = match Monitor::from_index(monitor_index) {
                 Ok(monitor) => monitor,
                 Err(e) => {
                     return Err(PyException::new_err(format!(
-                        "Failed To Get Monitor From Index -> {e}"
+                        "Failed to get monitor by index -> {e}"
                     )));
                 }
             };
@@ -235,11 +271,11 @@ impl NativeWindowsCapture {
                 Ok(()) => (),
                 Err(e) => {
                     return Err(PyException::new_err(format!(
-                        "InnerNativeWindowsCapture::start Threw An Exception -> {e}",
+                        "InnerNativeWindowsCapture::start failed -> {e}",
                     )));
                 }
             }
-        };
+        }
 
         Ok(())
     }
@@ -247,16 +283,11 @@ impl NativeWindowsCapture {
     /// Start Capture On A Dedicated Thread
     #[inline]
     pub fn start_free_threaded(&mut self) -> PyResult<NativeCaptureControl> {
-        let capture_control = if self.window_name.is_some() {
-            let window = match Window::from_contains_name(self.window_name.as_ref().unwrap()) {
-                Ok(window) => window,
-                Err(e) => {
-                    return Err(PyException::new_err(format!(
-                        "Failed To Find Window -> {e}"
-                    )));
-                }
-            };
+        let capture_control = if let Some(window_handle) = self.window_handle {
+            // Create a Window instance from the raw window handle
+            let window = Window::from_raw_hwnd(window_handle as *mut std::ffi::c_void);
 
+            // Create settings for capture session
             let settings = Settings::new(
                 window,
                 self.cursor_capture,
@@ -268,35 +299,59 @@ impl NativeWindowsCapture {
                 ),
             );
 
-            let capture_control = match InnerNativeWindowsCapture::start_free_threaded(settings) {
+            // Start capture session on a dedicated thread
+            match InnerNativeWindowsCapture::start_free_threaded(settings) {
                 Ok(capture_control) => capture_control,
                 Err(e) => {
-                    if let GraphicsCaptureApiError::FrameHandlerError(
-                        InnerNativeWindowsCaptureError::PythonError(ref e),
-                    ) = e
-                    {
-                        return Err(PyException::new_err(format!(
-                            "Capture Session Threw An Exception -> {e}",
-                        )));
-                    }
-
                     return Err(PyException::new_err(format!(
-                        "Capture Session Threw An Exception -> {e}",
+                        "Failed to start capture with window_handle -> {e}"
+                    )));
+                }
+            }
+        } else if let Some(window_name) = &self.window_name {
+            // Create a Window instance from the window name
+            let window = match Window::from_contains_name(window_name) {
+                Ok(window) => window,
+                Err(e) => {
+                    return Err(PyException::new_err(format!(
+                        "Failed to find window by name -> {e}"
                     )));
                 }
             };
 
-            NativeCaptureControl::new(capture_control)
-        } else {
-            let monitor = match Monitor::from_index(self.monitor_index.unwrap()) {
+            // Create settings for capture session
+            let settings = Settings::new(
+                window,
+                self.cursor_capture,
+                self.draw_border,
+                ColorFormat::Bgra8,
+                (
+                    self.on_frame_arrived_callback.clone(),
+                    self.on_closed.clone(),
+                ),
+            );
+
+            // Start capture session on a dedicated thread
+            match InnerNativeWindowsCapture::start_free_threaded(settings) {
+                Ok(capture_control) => capture_control,
+                Err(e) => {
+                    return Err(PyException::new_err(format!(
+                        "Failed to start capture with window_name -> {e}"
+                    )));
+                }
+            }
+        } else if let Some(monitor_index) = self.monitor_index {
+            // Create a Monitor instance from the monitor index
+            let monitor = match Monitor::from_index(monitor_index) {
                 Ok(monitor) => monitor,
                 Err(e) => {
                     return Err(PyException::new_err(format!(
-                        "Failed To Get Monitor From Index -> {e}"
+                        "Failed to get monitor by index -> {e}"
                     )));
                 }
             };
 
+            // Create settings for capture session
             let settings = Settings::new(
                 monitor,
                 self.cursor_capture,
@@ -308,28 +363,23 @@ impl NativeWindowsCapture {
                 ),
             );
 
-            let capture_control = match InnerNativeWindowsCapture::start_free_threaded(settings) {
+            // Start capture session on a dedicated thread
+            match InnerNativeWindowsCapture::start_free_threaded(settings) {
                 Ok(capture_control) => capture_control,
                 Err(e) => {
-                    if let GraphicsCaptureApiError::FrameHandlerError(
-                        InnerNativeWindowsCaptureError::PythonError(ref e),
-                    ) = e
-                    {
-                        return Err(PyException::new_err(format!(
-                            "Capture Session Threw An Exception -> {e}",
-                        )));
-                    }
-
                     return Err(PyException::new_err(format!(
-                        "Capture Session Threw An Exception -> {e}",
+                        "Failed to start capture with monitor_index -> {e}"
                     )));
                 }
-            };
-
-            NativeCaptureControl::new(capture_control)
+            }
+        } else {
+            return Err(PyException::new_err(
+                "No valid capture source specified. Please specify window_handle, window_name, or monitor_index.",
+            ));
         };
 
-        Ok(capture_control)
+        // Wrap the capture control in a Python-compatible wrapper and return it
+        Ok(NativeCaptureControl::new(capture_control))
     }
 }
 
