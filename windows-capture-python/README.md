@@ -63,6 +63,87 @@ def on_closed():
 
 capture.start()
 ```
+### Example: Capturing a Window Without the Top Bar
+
+The following example demonstrates how to capture a specific window (e.g., Notepad) and remove the top bar from the captured frame. This can be useful when you want to capture only the client area of the window.
+
+```python
+import win32gui
+from dataclasses import dataclass
+from windows_capture import WindowsCapture, Frame, InternalCaptureControl
+
+WINDOW_TITLE = "Notepad"
+
+# Every Error From on_closed and on_frame_arrived Will End Up Here
+capture = WindowsCapture(
+    cursor_capture=None,
+    draw_border=None,
+    monitor_index=None,
+    window_name=WINDOW_TITLE,
+)
+
+@dataclass
+class WindowRect:
+  """
+  A class to represent a rectangular window with properties for its dimensions and methods to retrieve its coordinates.
+  Attributes:
+    left (int): The left coordinate of the rectangle.
+    top (int): The top coordinate of the rectangle.
+    right (int): The right coordinate of the rectangle.
+    bottom (int): The bottom coordinate of the rectangle.
+  Properties:
+    width (int): The width of the rectangle, calculated as right - left.
+    height (int): The height of the rectangle, calculated as bottom - top.
+  Methods:
+    as_tuple(): Returns the coordinates of the rectangle as a tuple (left, top, right, bottom).
+  """
+  left: int
+  top: int
+  right: int
+  bottom: int
+
+  @property
+  def width(self):
+    return self.right - self.left
+  
+  @property
+  def height(self):
+    return self.bottom - self.top
+
+def get_window_rect(title: str, client: bool = False) -> WindowRect:
+  hwnd = win32gui.FindWindow(None, title)
+  if hwnd == 0:
+    raise ValueError(f"Window with title '{title}' not found.")
+  rect = win32gui.GetWindowRect(hwnd) if not client else win32gui.GetClientRect(hwnd)
+  left, top, right, bottom = rect
+  return WindowRect(left, top, right, bottom)
+
+# Called Every Time A New Frame Is Available
+@capture.event
+def on_frame_arrived(frame: Frame, capture_control: InternalCaptureControl):
+    print("New Frame Arrived")
+
+    # Remove the top bar from the frame
+    window_rect = get_window_rect(WINDOW_TITLE, client=True)
+    from_top_bar = frame.height - window_rect.height
+    frame = frame.crop(0, from_top_bar, window_rect.width, window_rect.height)
+
+    # Save The Frame As An Image To The Specified Path
+    frame.save_as_image("image.png")
+
+    # Gracefully Stop The Capture Thread
+    capture_control.stop()
+
+
+# Called When The Capture Item Closes Usually When The Window Closes, Capture
+# Session Will End After This Function Ends
+@capture.event
+def on_closed():
+    print("Capture Session Closed")
+
+
+capture.start()
+```
 
 ## Benchmark
 
