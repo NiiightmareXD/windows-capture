@@ -125,8 +125,8 @@ def on_frame_arrived(frame: Frame, capture_control: InternalCaptureControl):
 
     # Remove the top bar from the frame
     window_rect = get_window_rect(WINDOW_TITLE, client=True)
-    from_top_bar = frame.height - window_rect.height
-    frame = frame.crop(0, from_top_bar, window_rect.width, window_rect.height)
+    top_bar_size = frame.height - window_rect.height
+    frame = frame.crop(0, top_bar_size, window_rect.width, window_rect.height + top_bar_size)
 
     # Save The Frame As An Image To The Specified Path
     frame.save_as_image("image.png")
