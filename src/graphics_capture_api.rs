@@ -1,12 +1,11 @@
 use std::sync::{
-    atomic::{self, AtomicBool},
     Arc,
+    atomic::{self, AtomicBool},
 };
 
 use parking_lot::Mutex;
 use windows::{
-    core::{IInspectable, Interface, HSTRING},
-    Foundation::{EventRegistrationToken, Metadata::ApiInformation, TypedEventHandler},
+    Foundation::{Metadata::ApiInformation, TypedEventHandler},
     Graphics::{
         Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession},
         DirectX::{Direct3D11::IDirect3DDevice, DirectXPixelFormat},
@@ -14,16 +13,17 @@ use windows::{
     Win32::{
         Foundation::{LPARAM, WPARAM},
         Graphics::Direct3D11::{
-            ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_TEXTURE2D_DESC,
+            D3D11_TEXTURE2D_DESC, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
         },
         System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess,
         UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT},
     },
+    core::{HSTRING, IInspectable, Interface},
 };
 
 use crate::{
     capture::GraphicsCaptureApiHandler,
-    d3d11::{self, create_direct3d_device, SendDirectX},
+    d3d11::{self, SendDirectX, create_direct3d_device},
     frame::Frame,
     settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings},
 };
@@ -91,9 +91,9 @@ pub struct GraphicsCaptureApi {
     /// Indicates whether the GraphicsCaptureApi is active or not.
     active: bool,
     /// The EventRegistrationToken associated with the capture closed event.
-    capture_closed_event_token: EventRegistrationToken,
+    capture_closed_event_token: i64,
     /// The EventRegistrationToken associated with the frame arrived event.
-    frame_arrived_event_token: EventRegistrationToken,
+    frame_arrived_event_token: i64,
 }
 
 impl GraphicsCaptureApi {

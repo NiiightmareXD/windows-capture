@@ -52,7 +52,7 @@ impl NativeCaptureControl {
     pub fn is_finished(&self) -> bool {
         self.capture_control
             .as_ref()
-            .map_or(true, CaptureControl::is_finished)
+            .is_none_or(CaptureControl::is_finished)
     }
 
     #[inline]
@@ -376,7 +376,8 @@ impl GraphicsCaptureApiHandler for InnerNativeWindowsCapture {
             py.check_signals()
                 .map_err(InnerNativeWindowsCaptureError::PythonError)?;
 
-            let stop_list = PyList::new_bound(py, [false]);
+            let stop_list =
+                PyList::new(py, [false]).map_err(InnerNativeWindowsCaptureError::PythonError)?;
             self.on_frame_arrived_callback
                 .call1(
                     py,

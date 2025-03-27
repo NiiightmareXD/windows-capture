@@ -2,15 +2,15 @@ use std::{
     mem,
     os::windows::prelude::AsRawHandle,
     sync::{
+        Arc,
         atomic::{self, AtomicBool},
-        mpsc, Arc,
+        mpsc,
     },
     thread::{self, JoinHandle},
 };
 
 use parking_lot::Mutex;
 use windows::{
-    Foundation::AsyncActionCompletedHandler,
     Graphics::Capture::GraphicsCaptureItem,
     Win32::{
         Foundation::{HANDLE, LPARAM, WPARAM},
@@ -18,16 +18,18 @@ use windows::{
         System::{
             Threading::{GetCurrentThreadId, GetThreadId},
             WinRT::{
-                CreateDispatcherQueueController, DispatcherQueueOptions, RoInitialize,
-                RoUninitialize, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, RO_INIT_MULTITHREADED,
+                CreateDispatcherQueueController, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT,
+                DispatcherQueueOptions, RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize,
             },
         },
         UI::WindowsAndMessaging::{
-            DispatchMessageW, GetMessageW, PostQuitMessage, PostThreadMessageW, TranslateMessage,
-            MSG, WM_QUIT,
+            DispatchMessageW, GetMessageW, MSG, PostQuitMessage, PostThreadMessageW,
+            TranslateMessage, WM_QUIT,
         },
     },
+    core::Result as WindowsResult,
 };
+use windows_future::AsyncActionCompletedHandler;
 
 use crate::{
     d3d11::{self, create_d3d_device},
@@ -93,7 +95,7 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
     pub fn is_finished(&self) -> bool {
         self.thread_handle
             .as_ref()
-            .map_or(true, std::thread::JoinHandle::is_finished)
+            .is_none_or(std::thread::JoinHandle::is_finished)
     }
 
     /// Gets the join handle for the capture thread.
@@ -324,9 +326,10 @@ pub trait GraphicsCaptureApiHandler: Sized {
         let async_action = controller
             .ShutdownQueueAsync()
             .map_err(|_| GraphicsCaptureApiError::FailedToShutdownDispatcherQueue)?;
+
         async_action
             .SetCompleted(&AsyncActionCompletedHandler::new(
-                move |_, _| -> Result<(), windows::core::Error> {
+                move |_, _| -> WindowsResult<()> {
                     unsafe { PostQuitMessage(0) };
                     Ok(())
                 },

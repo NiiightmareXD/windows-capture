@@ -1,21 +1,20 @@
 use std::{ptr, string::FromUtf16Error};
 
 use windows::{
-    core::HSTRING,
     Graphics::Capture::GraphicsCaptureItem,
     Win32::{
-        Foundation::{BOOL, HWND, LPARAM, RECT, TRUE},
-        Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONULL},
+        Foundation::{HWND, LPARAM, RECT, TRUE},
+        Graphics::Gdi::{MONITOR_DEFAULTTONULL, MonitorFromWindow},
         System::{
             Threading::GetCurrentProcessId, WinRT::Graphics::Capture::IGraphicsCaptureItemInterop,
         },
         UI::WindowsAndMessaging::{
-            EnumChildWindows, FindWindowW, GetClientRect, GetDesktopWindow, GetForegroundWindow,
-            GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
-            GetWindowThreadProcessId, IsWindowVisible, GWL_EXSTYLE, GWL_STYLE, WS_CHILD,
-            WS_EX_TOOLWINDOW,
+            EnumChildWindows, FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetDesktopWindow,
+            GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW,
+            GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, WS_CHILD, WS_EX_TOOLWINDOW,
         },
     },
+    core::{BOOL, HSTRING},
 };
 
 use crate::monitor::Monitor;
@@ -224,7 +223,7 @@ impl Window {
 
         unsafe {
             EnumChildWindows(
-                GetDesktopWindow(),
+                Some(GetDesktopWindow()),
                 Some(Self::enum_windows_callback),
                 LPARAM(ptr::addr_of_mut!(windows) as isize),
             )

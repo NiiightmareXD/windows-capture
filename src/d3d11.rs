@@ -1,21 +1,22 @@
 use windows::{
-    core::Interface,
     Graphics::DirectX::Direct3D11::IDirect3DDevice,
     Win32::{
+        Foundation::HMODULE,
         Graphics::{
             Direct3D::{
-                D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_10_0,
+                D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_9_1,
+                D3D_FEATURE_LEVEL_9_2, D3D_FEATURE_LEVEL_9_3, D3D_FEATURE_LEVEL_10_0,
                 D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
-                D3D_FEATURE_LEVEL_9_1, D3D_FEATURE_LEVEL_9_2, D3D_FEATURE_LEVEL_9_3,
             },
             Direct3D11::{
-                D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext,
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION,
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice,
+                ID3D11Device, ID3D11DeviceContext,
             },
             Dxgi::IDXGIDevice,
         },
         System::WinRT::Direct3D11::CreateDirect3D11DeviceFromDXGIDevice,
     },
+    core::Interface,
 };
 
 #[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
@@ -73,7 +74,7 @@ pub fn create_d3d_device() -> Result<(ID3D11Device, ID3D11DeviceContext), Error>
         D3D11CreateDevice(
             None,
             D3D_DRIVER_TYPE_HARDWARE,
-            None,
+            HMODULE::default(),
             D3D11_CREATE_DEVICE_BGRA_SUPPORT,
             Some(&feature_flags),
             D3D11_SDK_VERSION,

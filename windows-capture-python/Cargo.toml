@@ -21,11 +21,11 @@ name = "windows_capture"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.22.5", features = [
+pyo3 = { version = "0.24.0", features = [
     "extension-module",
     "auto-initialize",
     "abi3",
     "abi3-py39",
 ] }
-thiserror = "1.0.66"
+thiserror = "2.0.12"
 windows-capture = { path = ".." }

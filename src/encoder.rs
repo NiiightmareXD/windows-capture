@@ -3,16 +3,16 @@ use std::{
     path::Path,
     slice,
     sync::{
+        Arc,
         atomic::{self, AtomicBool},
-        mpsc, Arc,
+        mpsc,
     },
     thread::{self, JoinHandle},
 };
 
 use parking_lot::{Condvar, Mutex};
 use windows::{
-    core::HSTRING,
-    Foundation::{EventRegistrationToken, TimeSpan, TypedEventHandler},
+    Foundation::{TimeSpan, TypedEventHandler},
     Graphics::{
         DirectX::Direct3D11::IDirect3DSurface,
         Imaging::{BitmapAlphaMode, BitmapEncoder, BitmapPixelFormat},
@@ -36,6 +36,7 @@ use windows::{
             Buffer, DataReader, IRandomAccessStream, InMemoryRandomAccessStream, InputStreamOptions,
         },
     },
+    core::{HSTRING, Interface},
 };
 
 use crate::{
@@ -505,9 +506,9 @@ pub struct VideoEncoder {
     first_timespan: Option<TimeSpan>,
     frame_sender: mpsc::Sender<Option<(VideoEncoderSource, TimeSpan)>>,
     audio_sender: mpsc::Sender<Option<(AudioEncoderSource, TimeSpan)>>,
-    sample_requested: EventRegistrationToken,
+    sample_requested: i64,
     media_stream_source: MediaStreamSource,
-    starting: EventRegistrationToken,
+    starting: i64,
     transcode_thread: Option<JoinHandle<Result<(), VideoEncoderError>>>,
     frame_notify: Arc<(Mutex<bool>, Condvar)>,
     audio_notify: Arc<(Mutex<bool>, Condvar)>,
@@ -609,8 +610,8 @@ impl VideoEncoder {
                 if sample_requested
                     .Request()?
                     .StreamDescriptor()?
-                    .GetRuntimeClassName()?
-                    == "Windows.Media.Core.AudioStreamDescriptor"
+                    .cast::<AudioStreamDescriptor>()
+                    .is_ok()
                 {
                     if is_audio_disabled {
                         sample_requested.Request()?.SetSample(None)?;
@@ -836,8 +837,8 @@ impl VideoEncoder {
                 if sample_requested
                     .Request()?
                     .StreamDescriptor()?
-                    .GetRuntimeClassName()?
-                    == "Windows.Media.Core.AudioStreamDescriptor"
+                    .cast::<AudioStreamDescriptor>()
+                    .is_ok()
                 {
                     if is_audio_disabled {
                         sample_requested.Request()?.SetSample(None)?;

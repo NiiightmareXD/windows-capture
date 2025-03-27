@@ -1,25 +1,25 @@
 use std::{mem, num::ParseIntError, ptr, string::FromUtf16Error};
 
 use windows::{
-    core::{HSTRING, PCWSTR},
     Graphics::Capture::GraphicsCaptureItem,
     Win32::{
         Devices::Display::{
-            DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QueryDisplayConfig,
             DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
             DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO,
             DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME,
             DISPLAYCONFIG_TARGET_DEVICE_NAME_FLAGS, DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY,
-            QDC_ONLY_ACTIVE_PATHS,
+            DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS,
+            QueryDisplayConfig,
         },
-        Foundation::{BOOL, LPARAM, POINT, RECT, TRUE},
+        Foundation::{LPARAM, POINT, RECT, TRUE},
         Graphics::Gdi::{
-            EnumDisplayDevicesW, EnumDisplayMonitors, EnumDisplaySettingsW, GetMonitorInfoW,
-            MonitorFromPoint, DEVMODEW, DISPLAY_DEVICEW, ENUM_CURRENT_SETTINGS, HDC, HMONITOR,
-            MONITORINFO, MONITORINFOEXW, MONITOR_DEFAULTTONULL,
+            DEVMODEW, DISPLAY_DEVICE_STATE_FLAGS, DISPLAY_DEVICEW, ENUM_CURRENT_SETTINGS,
+            EnumDisplayDevicesW, EnumDisplayMonitors, EnumDisplaySettingsW, GetMonitorInfoW, HDC,
+            HMONITOR, MONITOR_DEFAULTTONULL, MONITORINFO, MONITORINFOEXW, MonitorFromPoint,
         },
         System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop,
     },
+    core::{BOOL, HSTRING, PCWSTR},
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -300,7 +300,7 @@ impl Monitor {
             cb: u32::try_from(mem::size_of::<DISPLAY_DEVICEW>()).unwrap(),
             DeviceName: [0; 32],
             DeviceString: [0; 128],
-            StateFlags: 0,
+            StateFlags: DISPLAY_DEVICE_STATE_FLAGS::default(),
             DeviceID: [0; 128],
             DeviceKey: [0; 128],
         };
