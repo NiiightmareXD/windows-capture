@@ -8,7 +8,6 @@ pub enum ColorFormat {
 }
 
 impl Default for ColorFormat {
-    #[must_use]
     #[inline]
     fn default() -> Self {
         Self::Rgba8

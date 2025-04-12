@@ -13,13 +13,13 @@ use parking_lot::Mutex;
 use windows::{
     Graphics::Capture::GraphicsCaptureItem,
     Win32::{
-        Foundation::{HANDLE, LPARAM, WPARAM},
+        Foundation::{HANDLE, LPARAM, S_FALSE, WPARAM},
         Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext},
         System::{
             Threading::{GetCurrentThreadId, GetThreadId},
             WinRT::{
                 CreateDispatcherQueueController, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT,
-                DispatcherQueueOptions, RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize,
+                DispatcherQueueOptions, RO_INIT_MULTITHREADED, RoInitialize,
             },
         },
         UI::WindowsAndMessaging::{
@@ -257,10 +257,16 @@ pub trait GraphicsCaptureApiHandler: Sized {
         <Self as GraphicsCaptureApiHandler>::Flags: Send,
     {
         // Initialize WinRT
-        unsafe {
-            RoInitialize(RO_INIT_MULTITHREADED)
-                .map_err(|_| GraphicsCaptureApiError::FailedToInitWinRT)?;
-        };
+        match unsafe { RoInitialize(RO_INIT_MULTITHREADED) } {
+            Ok(_) => (),
+            Err(e) => {
+                if e.code() == S_FALSE {
+                    // Already initialized
+                } else {
+                    return Err(GraphicsCaptureApiError::FailedToInitWinRT);
+                }
+            }
+        }
 
         // Create a dispatcher queue for the current thread
         let options = DispatcherQueueOptions {
@@ -349,7 +355,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
         capture.stop_capture();
 
         // Uninitialize WinRT
-        unsafe { RoUninitialize() };
+        // unsafe { RoUninitialize() }; // Not sure if this is needed here
 
         // Check handler result
         let result = result.lock().take();
@@ -383,10 +389,16 @@ pub trait GraphicsCaptureApiHandler: Sized {
         let thread_handle = thread::spawn(
             move || -> Result<(), GraphicsCaptureApiError<Self::Error>> {
                 // Initialize WinRT
-                unsafe {
-                    RoInitialize(RO_INIT_MULTITHREADED)
-                        .map_err(|_| GraphicsCaptureApiError::FailedToInitWinRT)?;
-                };
+                match unsafe { RoInitialize(RO_INIT_MULTITHREADED) } {
+                    Ok(_) => (),
+                    Err(e) => {
+                        if e.code() == S_FALSE {
+                            // Already initialized
+                        } else {
+                            return Err(GraphicsCaptureApiError::FailedToInitWinRT);
+                        }
+                    }
+                }
 
                 // Create a dispatcher queue for the current thread
                 let options = DispatcherQueueOptions {
@@ -436,6 +448,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
                     result.clone(),
                 )
                 .map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?;
+
                 capture
                     .start_capture()
                     .map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?;
@@ -485,7 +498,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
                 capture.stop_capture();
 
                 // Uninitialize WinRT
-                unsafe { RoUninitialize() };
+                // unsafe { RoUninitialize() }; // Not sure if this is needed here
 
                 // Check handler result
                 let result = result.lock().take();
