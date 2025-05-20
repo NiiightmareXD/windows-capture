@@ -3,6 +3,7 @@ use std::{
     os::windows::prelude::AsRawHandle,
     sync::{
         Arc,
+        OnceLock,
         atomic::{self, AtomicBool},
         mpsc,
     },
@@ -16,6 +17,7 @@ use windows::{
         Foundation::{HANDLE, LPARAM, S_FALSE, WPARAM},
         Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext},
         System::{
+            Com::CoIncrementMTAUsage,
             Threading::{GetCurrentThreadId, GetThreadId},
             WinRT::{
                 CreateDispatcherQueueController, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT,
@@ -257,6 +259,10 @@ pub trait GraphicsCaptureApiHandler: Sized {
         <Self as GraphicsCaptureApiHandler>::Flags: Send,
     {
         // Initialize WinRT
+        static INIT_MTA: OnceLock<()> = OnceLock::new();
+        INIT_MTA.get_or_init(|| {
+            unsafe { CoIncrementMTAUsage().unwrap() };
+        });
         match unsafe { RoInitialize(RO_INIT_MULTITHREADED) } {
             Ok(_) => (),
             Err(e) => {
@@ -389,6 +395,10 @@ pub trait GraphicsCaptureApiHandler: Sized {
         let thread_handle = thread::spawn(
             move || -> Result<(), GraphicsCaptureApiError<Self::Error>> {
                 // Initialize WinRT
+                static INIT_MTA: OnceLock<()> = OnceLock::new();
+                INIT_MTA.get_or_init(|| {
+                    unsafe { CoIncrementMTAUsage().unwrap() };
+                });
                 match unsafe { RoInitialize(RO_INIT_MULTITHREADED) } {
                     Ok(_) => (),
                     Err(e) => {
