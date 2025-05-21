@@ -19,7 +19,6 @@ categories = [
 resolver = "2"
 
 [dependencies]
-# Windows API
 windows = { version = "0.61.1", features = [
     "Foundation_Metadata",
     "Foundation",
@@ -44,7 +43,8 @@ windows = { version = "0.61.1", features = [
     "Win32_System_WinRT_Direct3D11",
     "Win32_System_WinRT_Graphics_Capture",
     "Win32_UI_WindowsAndMessaging",
-] }
+    "Win32_System_ProcessStatus",
+] } # Windows API
 windows-future = "0.2.1"
 
 # Mutex optimization

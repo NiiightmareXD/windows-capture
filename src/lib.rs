@@ -143,7 +143,10 @@
 //! ```
 #![warn(clippy::nursery)]
 #![warn(clippy::cargo)]
-#![allow(clippy::multiple_crate_versions)] // Should update as soon as possible
+#![warn(clippy::multiple_crate_versions)] // Should update as soon as possible
+
+/// Exported for the trait bounds
+pub use windows::Graphics::Capture::GraphicsCaptureItem as WindowsCaptureGraphicsCaptureItem;
 
 /// Contains the main capture functionality, including the `WindowsCaptureHandler` trait and related types.
 pub mod capture;

@@ -6,7 +6,11 @@ use windows::{
         Foundation::{HWND, LPARAM, RECT, TRUE},
         Graphics::Gdi::{MONITOR_DEFAULTTONULL, MonitorFromWindow},
         System::{
-            Threading::GetCurrentProcessId, WinRT::Graphics::Capture::IGraphicsCaptureItemInterop,
+            ProcessStatus::GetModuleBaseNameW,
+            Threading::{
+                GetCurrentProcessId, OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+            },
+            WinRT::Graphics::Capture::IGraphicsCaptureItemInterop,
         },
         UI::WindowsAndMessaging::{
             EnumChildWindows, FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetDesktopWindow,
@@ -14,7 +18,7 @@ use windows::{
             GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, WS_CHILD, WS_EX_TOOLWINDOW,
         },
     },
-    core::{BOOL, HSTRING},
+    core::{BOOL, HSTRING, Owned},
 };
 
 use crate::monitor::Monitor;
@@ -136,7 +140,58 @@ impl Window {
                 .iter()
                 .take_while(|ch| **ch != 0x0000)
                 .copied()
-                .collect::<Vec<_>>(),
+                .collect::<Vec<u16>>(),
+        )?;
+
+        Ok(name)
+    }
+
+    /// Returns the process name of the window.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` if there is an error retrieving the process name.
+    #[inline]
+    pub fn process_id(&self) -> Result<u32, Error> {
+        let mut id = 0;
+        unsafe { GetWindowThreadProcessId(self.window, Some(&mut id)) };
+
+        if id == 0 {
+            return Err(windows::core::Error::from_win32().into());
+        }
+
+        Ok(id)
+    }
+
+    /// Returns the process name of the window.
+    ///
+    /// Requires the `PROCESS_QUERY_INFORMATION` and `PROCESS_VM_READ` permissions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` if there is an error retrieving the process name.
+    #[inline]
+    pub fn process_name(&self) -> Result<String, Error> {
+        let id = self.process_id()?;
+
+        let process =
+            unsafe { OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, id) }?;
+        let process = unsafe { Owned::new(process) };
+
+        let mut name = vec![0u16; 260];
+        let size = unsafe { GetModuleBaseNameW(*process, None, &mut name) };
+
+        if size == 0 {
+            return Err(windows::core::Error::from_win32().into());
+        }
+
+        let name = String::from_utf16(
+            &name
+                .as_slice()
+                .iter()
+                .take_while(|ch| **ch != 0x0000)
+                .copied()
+                .collect::<Vec<u16>>(),
         )?;
 
         Ok(name)
