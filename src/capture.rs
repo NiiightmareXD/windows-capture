@@ -2,8 +2,7 @@ use std::{
     mem,
     os::windows::prelude::AsRawHandle,
     sync::{
-        Arc,
-        OnceLock,
+        Arc, OnceLock,
         atomic::{self, AtomicBool},
         mpsc,
     },
@@ -261,8 +260,11 @@ pub trait GraphicsCaptureApiHandler: Sized {
         // Initialize WinRT
         static INIT_MTA: OnceLock<()> = OnceLock::new();
         INIT_MTA.get_or_init(|| {
-            unsafe { CoIncrementMTAUsage().unwrap() };
+            unsafe {
+                CoIncrementMTAUsage().expect("Failed to increment MTA usage");
+            };
         });
+
         match unsafe { RoInitialize(RO_INIT_MULTITHREADED) } {
             Ok(_) => (),
             Err(e) => {
@@ -397,8 +399,11 @@ pub trait GraphicsCaptureApiHandler: Sized {
                 // Initialize WinRT
                 static INIT_MTA: OnceLock<()> = OnceLock::new();
                 INIT_MTA.get_or_init(|| {
-                    unsafe { CoIncrementMTAUsage().unwrap() };
+                    unsafe {
+                        CoIncrementMTAUsage().expect("Failed to increment MTA usage");
+                    };
                 });
+
                 match unsafe { RoInitialize(RO_INIT_MULTITHREADED) } {
                     Ok(_) => (),
                     Err(e) => {
