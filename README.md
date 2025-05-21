@@ -153,7 +153,7 @@ Detailed documentation for each API and type can be found [here](https://docs.rs
 
 ## Contributing
 
-Contributions are welcome! If you find a bug or want to add new features to the library, please open an issue or submit a pull request.
+Contributions are welcome! If you find a bug or want to add new features to the library, please open an issue or submit a pull request. (also add emojis to commit message 😅)
 
 ## License
 
