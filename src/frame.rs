@@ -11,17 +11,25 @@ use windows::{
     Graphics::DirectX::Direct3D11::IDirect3DSurface,
     Win32::Graphics::{
         Direct3D11::{
-            ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_BOX, D3D11_CPU_ACCESS_READ,
-            D3D11_CPU_ACCESS_WRITE, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ_WRITE,
-            D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
+            D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CPU_ACCESS_WRITE, D3D11_MAP_READ_WRITE,
+            D3D11_MAPPED_SUBRESOURCE, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, ID3D11Device,
+            ID3D11DeviceContext, ID3D11Texture2D,
         },
         Dxgi::Common::{DXGI_FORMAT, DXGI_SAMPLE_DESC},
+    },
+    Win32::{
+        Foundation::HWND,
+        UI::{
+            HiDpi::GetDpiForWindow,
+            WindowsAndMessaging::{GetSystemMetrics, SM_CXPADDEDBORDER, SM_CYCAPTION, SM_CYFRAME},
+        },
     },
 };
 
 use crate::{
     encoder::{self, ImageEncoder},
     settings::ColorFormat,
+    window::Window,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -66,6 +74,8 @@ pub struct Frame<'a> {
     width: u32,
     height: u32,
     color_format: ColorFormat,
+    exclude_title_bar: bool,
+    window: Option<Window>,
 }
 
 impl<'a> Frame<'a> {
@@ -99,6 +109,8 @@ impl<'a> Frame<'a> {
         width: u32,
         height: u32,
         color_format: ColorFormat,
+        exclude_title_bar: bool,
+        window: Option<Window>,
     ) -> Self {
         Self {
             d3d_device,
@@ -110,6 +122,8 @@ impl<'a> Frame<'a> {
             width,
             height,
             color_format,
+            exclude_title_bar,
+            window,
         }
     }
 
@@ -192,6 +206,23 @@ impl<'a> Frame<'a> {
     /// The FrameBuffer containing the frame data.
     #[inline]
     pub fn buffer(&mut self) -> Result<FrameBuffer, Error> {
+        if self.exclude_title_bar && self.window.as_ref().map_or(false, |w| w.is_valid()) {
+            let hwnd: HWND = HWND(self.window.as_ref().unwrap().as_raw_hwnd());
+
+            let dpi = unsafe { GetDpiForWindow(hwnd) } as i32;
+            let caption = unsafe { GetSystemMetrics(SM_CYCAPTION) };
+            let border = unsafe { GetSystemMetrics(SM_CYFRAME) };
+            let padding = unsafe { GetSystemMetrics(SM_CXPADDEDBORDER) };
+            let top_offset = (caption + border + padding) * dpi / 96;
+
+            if top_offset > 0 {
+                let top_offset_u32 = top_offset as u32;
+                if self.height > top_offset_u32 {
+                    return self.buffer_crop(0, top_offset_u32, self.width, self.height);
+                }
+            }
+        }
+
         // Texture Settings
         let texture_desc = D3D11_TEXTURE2D_DESC {
             Width: self.width,
