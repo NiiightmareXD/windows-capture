@@ -26,6 +26,7 @@ use crate::{
     d3d11::{self, SendDirectX, create_direct3d_device},
     frame::Frame,
     settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings},
+    window::Window,
 };
 
 #[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
@@ -127,6 +128,8 @@ impl GraphicsCaptureApi {
         cursor_capture: CursorCaptureSettings,
         draw_border: DrawBorderSettings,
         color_format: ColorFormat,
+        exclude_title_bar: bool,
+        window: Option<Window>,
         thread_id: u32,
         result: Arc<Mutex<Option<E>>>,
     ) -> Result<Self, Error> {
@@ -207,6 +210,8 @@ impl GraphicsCaptureApi {
             let mut last_size = item.Size()?;
             let callback_frame_pool = callback;
             let direct3d_device_recreate = SendDirectX::new(direct3d_device.clone());
+            // Capture exclude_title_bar for the closure
+            let exclude_title_bar_for_closure = exclude_title_bar;
 
             move |frame, _| {
                 // Return early if the capture is closed
@@ -268,6 +273,8 @@ impl GraphicsCaptureApi {
                     texture_width,
                     texture_height,
                     color_format,
+                    exclude_title_bar_for_closure,
+                    window,
                 );
 
                 // Init internal capture control

@@ -101,6 +101,8 @@ fn main() {
         ColorFormat::Rgba8,
         // Additional flags for the capture settings that will be passed to user defined `new` function.
         "Yea this works".to_string(),
+        // Set to true to attempt to exclude the title bar, e.g. for window capture.
+        false, // exclude_title_bar
     );
 
     // Starts the capture and takes control of the current thread.
