@@ -16,12 +16,13 @@ use windows::{
             ID3D11DeviceContext, ID3D11Texture2D,
         },
         Dxgi::Common::{DXGI_FORMAT, DXGI_SAMPLE_DESC},
+        Gdi::ClientToScreen,
     },
     Win32::{
         Foundation::HWND,
         UI::{
             HiDpi::GetDpiForWindow,
-            WindowsAndMessaging::{GetSystemMetrics, SM_CXPADDEDBORDER, SM_CYCAPTION, SM_CYFRAME},
+            WindowsAndMessaging::{GetClientRect, GetWindowRect},
         },
     },
 };
@@ -209,14 +210,23 @@ impl<'a> Frame<'a> {
         if self.exclude_title_bar && self.window.as_ref().map_or(false, |w| w.is_valid()) {
             let hwnd: HWND = HWND(self.window.as_ref().unwrap().as_raw_hwnd());
 
-            let dpi = unsafe { GetDpiForWindow(hwnd) } as i32;
-            let caption = unsafe { GetSystemMetrics(SM_CYCAPTION) };
-            let border = unsafe { GetSystemMetrics(SM_CYFRAME) };
-            let padding = unsafe { GetSystemMetrics(SM_CXPADDEDBORDER) };
-            let top_offset = (caption + border + padding) * dpi / 96;
+            let mut window_rect = windows::Win32::Foundation::RECT::default();
+            let mut client_rect = windows::Win32::Foundation::RECT::default();
+            unsafe {
+                let _ = GetWindowRect(hwnd, &mut window_rect);
+                let _ = GetClientRect(hwnd, &mut client_rect);
+            }
 
-            if top_offset > 0 {
-                let top_offset_u32 = top_offset as u32;
+            let mut client_point = windows::Win32::Foundation::POINT { x: 0, y: 0 };
+            unsafe {
+                let _ = ClientToScreen(hwnd, &mut client_point);
+            }
+
+            let dpi = unsafe { GetDpiForWindow(hwnd) };
+            let actual_title_height = (client_point.y - window_rect.top) * dpi as i32 / 96;
+
+            if actual_title_height > 0 {
+                let top_offset_u32 = actual_title_height as u32;
                 if self.height > top_offset_u32 {
                     return self.buffer_crop(0, top_offset_u32, self.width, self.height);
                 }
