@@ -15,15 +15,13 @@ use windows::{
             D3D11_MAPPED_SUBRESOURCE, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, ID3D11Device,
             ID3D11DeviceContext, ID3D11Texture2D,
         },
+        Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
         Dxgi::Common::{DXGI_FORMAT, DXGI_SAMPLE_DESC},
         Gdi::ClientToScreen,
     },
     Win32::{
-        Foundation::HWND,
-        UI::{
-            HiDpi::GetDpiForWindow,
-            WindowsAndMessaging::{GetClientRect, GetWindowRect},
-        },
+        Foundation::{HWND, POINT, RECT},
+        UI::{HiDpi::GetDpiForWindow, WindowsAndMessaging::GetClientRect},
     },
 };
 
@@ -210,20 +208,31 @@ impl<'a> Frame<'a> {
         if self.exclude_title_bar && self.window.as_ref().map_or(false, |w| w.is_valid()) {
             let hwnd: HWND = HWND(self.window.as_ref().unwrap().as_raw_hwnd());
 
-            let mut window_rect = windows::Win32::Foundation::RECT::default();
-            let mut client_rect = windows::Win32::Foundation::RECT::default();
+            let mut window_rect = RECT::default();
+            let mut client_rect = RECT::default();
+
             unsafe {
-                let _ = GetWindowRect(hwnd, &mut window_rect);
+                let _ = DwmGetWindowAttribute(
+                    hwnd,
+                    DWMWA_EXTENDED_FRAME_BOUNDS, // Use with DwmGetWindowAttribute. Retrieves the extended frame bounds rectangle in *screen space*. The retrieved value is of type RECT. https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute
+                    &mut window_rect as *mut _ as *mut _,
+                    std::mem::size_of::<RECT>() as u32,
+                );
                 let _ = GetClientRect(hwnd, &mut client_rect);
             }
 
-            let mut client_point = windows::Win32::Foundation::POINT { x: 0, y: 0 };
+            let mut client_point = POINT { x: 0, y: 0 };
             unsafe {
                 let _ = ClientToScreen(hwnd, &mut client_point);
             }
 
+            let window_hight = window_rect.bottom - window_rect.top;
+
             let dpi = unsafe { GetDpiForWindow(hwnd) };
-            let actual_title_height = (client_point.y - window_rect.top) * dpi as i32 / 96;
+
+            let client_hight = (client_rect.bottom - client_rect.top) * dpi as i32 / 96;
+
+            let actual_title_height = (window_hight - client_hight) as i32;
 
             if actual_title_height > 0 {
                 let top_offset_u32 = actual_title_height as u32;
