@@ -232,12 +232,11 @@ impl<'a> Frame<'a> {
 
             let client_hight = (client_rect.bottom - client_rect.top) * dpi as i32 / 96;
 
-            let actual_title_height = (window_hight - client_hight) as i32;
+            let actual_title_height = (window_hight - client_hight) as u32;
 
             if actual_title_height > 0 {
-                let top_offset_u32 = actual_title_height as u32;
-                if self.height > top_offset_u32 {
-                    return self.buffer_crop(0, top_offset_u32, self.width, self.height);
+                if self.height > actual_title_height {
+                    return self.buffer_crop(0, actual_title_height, self.width, self.height);
                 }
             }
         }

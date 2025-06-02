@@ -49,7 +49,7 @@ pub struct Settings<Flags, T: TryInto<GraphicsCaptureItem>> {
     ///
     /// If set to `true`, the capture will attempt to crop out the title bar.
     /// This calculation relies on the system's standard caption height metric (`SM_CYCAPTION`).
-    pub exclude_title_bar: bool,
+    pub(crate) exclude_title_bar: bool,
 }
 
 impl<Flags, T> Settings<Flags, T>
