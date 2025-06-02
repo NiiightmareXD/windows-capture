@@ -3,8 +3,11 @@ use std::{ptr, string::FromUtf16Error};
 use windows::{
     Graphics::Capture::GraphicsCaptureItem,
     Win32::{
-        Foundation::{HWND, LPARAM, RECT, TRUE},
-        Graphics::Gdi::{MONITOR_DEFAULTTONULL, MonitorFromWindow},
+        Foundation::{HWND, LPARAM, POINT, RECT, TRUE},
+        Graphics::{
+            Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
+            Gdi::{ClientToScreen, MONITOR_DEFAULTTONULL, MonitorFromWindow},
+        },
         System::{
             ProcessStatus::GetModuleBaseNameW,
             Threading::{
@@ -12,10 +15,14 @@ use windows::{
             },
             WinRT::Graphics::Capture::IGraphicsCaptureItemInterop,
         },
-        UI::WindowsAndMessaging::{
-            EnumChildWindows, FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetDesktopWindow,
-            GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW,
-            GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, WS_CHILD, WS_EX_TOOLWINDOW,
+        UI::{
+            HiDpi::GetDpiForWindow,
+            WindowsAndMessaging::{
+                EnumChildWindows, FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetClientRect,
+                GetDesktopWindow, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect,
+                GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
+                WS_CHILD, WS_EX_TOOLWINDOW,
+            },
         },
     },
     core::{BOOL, HSTRING, Owned},
@@ -227,6 +234,42 @@ impl Window {
             Ok(rect)
         } else {
             Err(Error::WindowsError(windows::core::Error::from_win32()))
+        }
+    }
+
+    /// Calculates the height of the window's title bar in pixels.
+    ///
+    /// Returns `None` if the value could not be determined.
+    #[must_use]
+    #[inline]
+    pub fn title_bar_height(&self) -> Option<u32> {
+        let mut window_rect = RECT::default();
+        let mut client_rect = RECT::default();
+
+        unsafe {
+            let _ = DwmGetWindowAttribute(
+                self.window,
+                DWMWA_EXTENDED_FRAME_BOUNDS,
+                &mut window_rect as *mut _ as *mut _,
+                std::mem::size_of::<RECT>() as u32,
+            );
+            let _ = GetClientRect(self.window, &mut client_rect);
+        }
+
+        let mut client_point = POINT { x: 0, y: 0 };
+        unsafe {
+            let _ = ClientToScreen(self.window, &mut client_point);
+        }
+
+        let window_height = window_rect.bottom - window_rect.top;
+        let dpi = unsafe { GetDpiForWindow(self.window) };
+        let client_height = (client_rect.bottom - client_rect.top) * dpi as i32 / 96;
+        let actual_title_height = (window_height - client_height) as i32;
+
+        if actual_title_height > 0 {
+            Some(actual_title_height as u32)
+        } else {
+            None
         }
     }
 

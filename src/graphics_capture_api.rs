@@ -148,6 +148,16 @@ impl GraphicsCaptureApi {
             return Err(Error::BorderConfigUnsupported);
         }
 
+        // Pre-calculate the title bar height so each frame doesn't need to do it
+        let title_bar_height = if exclude_title_bar {
+            window
+                .as_ref()
+                .and_then(Window::title_bar_height)
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
         // Create DirectX devices
         let direct3d_device = create_direct3d_device(&d3d_device)?;
 
@@ -210,8 +220,6 @@ impl GraphicsCaptureApi {
             let mut last_size = item.Size()?;
             let callback_frame_pool = callback;
             let direct3d_device_recreate = SendDirectX::new(direct3d_device.clone());
-            // Capture exclude_title_bar for the closure
-            let exclude_title_bar_for_closure = exclude_title_bar;
 
             move |frame, _| {
                 // Return early if the capture is closed
@@ -273,7 +281,8 @@ impl GraphicsCaptureApi {
                     texture_width,
                     texture_height,
                     color_format,
-                    exclude_title_bar_for_closure,
+                    exclude_title_bar,
+                    title_bar_height,
                     window,
                 );
 
