@@ -277,7 +277,6 @@ impl GraphicsCaptureApi {
                     texture_height,
                     color_format,
                     title_bar_height,
-                    window,
                 );
 
                 // Init internal capture control

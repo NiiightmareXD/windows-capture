@@ -22,7 +22,6 @@ use windows::{
 use crate::{
     encoder::{self, ImageEncoder},
     settings::ColorFormat,
-    window::Window,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -68,7 +67,6 @@ pub struct Frame<'a> {
     height: u32,
     color_format: ColorFormat,
     title_bar_height: u32,
-    window: Option<Window>,
 }
 
 impl<'a> Frame<'a> {
@@ -103,7 +101,6 @@ impl<'a> Frame<'a> {
         height: u32,
         color_format: ColorFormat,
         title_bar_height: u32,
-        window: Option<Window>,
     ) -> Self {
         Self {
             d3d_device,
@@ -116,7 +113,6 @@ impl<'a> Frame<'a> {
             height,
             color_format,
             title_bar_height,
-            window,
         }
     }
 
@@ -381,10 +377,7 @@ impl<'a> Frame<'a> {
     /// The FrameBuffer containing the frame data without the title bar.
     #[inline]
     pub fn buffer_without_title_bar(&mut self) -> Result<FrameBuffer, Error> {
-        if self.window.as_ref().map_or(false, |w| w.is_valid())
-            && self.title_bar_height > 0
-            && self.height > self.title_bar_height
-        {
+        if self.title_bar_height > 0 && self.height > self.title_bar_height {
             return self.buffer_crop(0, self.title_bar_height, self.width, self.height);
         } else {
             return self.buffer();
