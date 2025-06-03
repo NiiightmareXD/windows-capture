@@ -230,8 +230,6 @@ pub struct Context<Flags> {
     pub device: ID3D11Device,
     /// The direct3d device context.
     pub device_context: ID3D11DeviceContext,
-    /// Specifies whether to exclude the title bar.
-    pub exclude_title_bar: bool,
 }
 
 /// A trait representing a graphics capture handler.
@@ -302,7 +300,6 @@ pub trait GraphicsCaptureApiHandler: Sized {
             flags: settings.flags,
             device: d3d_device.clone(),
             device_context: d3d_device_context.clone(),
-            exclude_title_bar: settings.exclude_title_bar,
         };
 
         let callback = Arc::new(Mutex::new(
@@ -324,7 +321,6 @@ pub trait GraphicsCaptureApiHandler: Sized {
             settings.cursor_capture,
             settings.draw_border,
             settings.color_format,
-            settings.exclude_title_bar,
             window,
             thread_id,
             result.clone(),
@@ -447,7 +443,6 @@ pub trait GraphicsCaptureApiHandler: Sized {
                     flags: settings.flags,
                     device: d3d_device.clone(),
                     device_context: d3d_device_context.clone(),
-                    exclude_title_bar: settings.exclude_title_bar,
                 };
 
                 let callback = Arc::new(Mutex::new(
@@ -469,7 +464,6 @@ pub trait GraphicsCaptureApiHandler: Sized {
                     settings.cursor_capture,
                     settings.draw_border,
                     settings.color_format,
-                    settings.exclude_title_bar,
                     window,
                     thread_id,
                     result.clone(),

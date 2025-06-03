@@ -67,7 +67,6 @@ pub struct Frame<'a> {
     width: u32,
     height: u32,
     color_format: ColorFormat,
-    exclude_title_bar: bool,
     title_bar_height: u32,
     window: Option<Window>,
 }
@@ -103,7 +102,6 @@ impl<'a> Frame<'a> {
         width: u32,
         height: u32,
         color_format: ColorFormat,
-        exclude_title_bar: bool,
         title_bar_height: u32,
         window: Option<Window>,
     ) -> Self {
@@ -117,7 +115,6 @@ impl<'a> Frame<'a> {
             width,
             height,
             color_format,
-            exclude_title_bar,
             title_bar_height,
             window,
         }
@@ -202,13 +199,6 @@ impl<'a> Frame<'a> {
     /// The FrameBuffer containing the frame data.
     #[inline]
     pub fn buffer(&mut self) -> Result<FrameBuffer, Error> {
-        if self.exclude_title_bar
-            && self.window.as_ref().map_or(false, |w| w.is_valid())
-            && self.title_bar_height > 0
-            && self.height > self.title_bar_height
-        {
-            return self.buffer_crop(0, self.title_bar_height, self.width, self.height);
-        }
         // Texture Settings
         let texture_desc = D3D11_TEXTURE2D_DESC {
             Width: self.width,
@@ -382,6 +372,23 @@ impl<'a> Frame<'a> {
         );
 
         Ok(frame_buffer)
+    }
+
+    /// Get the frame buffer without the title bar.Add commentMore actions
+    ///
+    /// # Returns
+    ///
+    /// The FrameBuffer containing the frame data without the title bar.
+    #[inline]
+    pub fn buffer_without_title_bar(&mut self) -> Result<FrameBuffer, Error> {
+        if self.window.as_ref().map_or(false, |w| w.is_valid())
+            && self.title_bar_height > 0
+            && self.height > self.title_bar_height
+        {
+            return self.buffer_crop(0, self.title_bar_height, self.width, self.height);
+        } else {
+            return self.buffer();
+        }
     }
 
     /// Save the frame buffer as an image to the specified path.

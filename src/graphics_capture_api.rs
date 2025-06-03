@@ -128,7 +128,6 @@ impl GraphicsCaptureApi {
         cursor_capture: CursorCaptureSettings,
         draw_border: DrawBorderSettings,
         color_format: ColorFormat,
-        exclude_title_bar: bool,
         window: Option<Window>,
         thread_id: u32,
         result: Arc<Mutex<Option<E>>>,
@@ -149,14 +148,10 @@ impl GraphicsCaptureApi {
         }
 
         // Pre-calculate the title bar height so each frame doesn't need to do it
-        let title_bar_height = if exclude_title_bar {
-            window
-                .as_ref()
-                .and_then(Window::title_bar_height)
-                .unwrap_or(0)
-        } else {
-            0
-        };
+        let title_bar_height = window
+            .as_ref()
+            .and_then(Window::title_bar_height)
+            .unwrap_or(0);
 
         // Create DirectX devices
         let direct3d_device = create_direct3d_device(&d3d_device)?;
@@ -281,7 +276,6 @@ impl GraphicsCaptureApi {
                     texture_width,
                     texture_height,
                     color_format,
-                    exclude_title_bar,
                     title_bar_height,
                     window,
                 );

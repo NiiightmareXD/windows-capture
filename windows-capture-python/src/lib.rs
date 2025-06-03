@@ -200,7 +200,6 @@ impl NativeWindowsCapture {
                     self.on_frame_arrived_callback.clone(),
                     self.on_closed.clone(),
                 ),
-                false,
             );
 
             match InnerNativeWindowsCapture::start(settings) {
@@ -230,7 +229,6 @@ impl NativeWindowsCapture {
                     self.on_frame_arrived_callback.clone(),
                     self.on_closed.clone(),
                 ),
-                false,
             );
 
             match InnerNativeWindowsCapture::start(settings) {
@@ -268,7 +266,6 @@ impl NativeWindowsCapture {
                     self.on_frame_arrived_callback.clone(),
                     self.on_closed.clone(),
                 ),
-                false,
             );
 
             let capture_control = match InnerNativeWindowsCapture::start_free_threaded(settings) {
@@ -309,7 +306,6 @@ impl NativeWindowsCapture {
                     self.on_frame_arrived_callback.clone(),
                     self.on_closed.clone(),
                 ),
-                false,
             );
 
             let capture_control = match InnerNativeWindowsCapture::start_free_threaded(settings) {

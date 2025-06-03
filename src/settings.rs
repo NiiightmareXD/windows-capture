@@ -45,11 +45,6 @@ pub struct Settings<Flags, T: TryInto<GraphicsCaptureItem>> {
     pub(crate) color_format: ColorFormat,
     /// Additional flags for capturing graphics.
     pub(crate) flags: Flags,
-    /// Specifies whether to exclude the window's title bar from the capture.
-    ///
-    /// If set to `true`, the capture will attempt to crop out the title bar.
-    /// This calculation relies on the system's standard caption height metric (`SM_CYCAPTION`).
-    pub(crate) exclude_title_bar: bool,
 }
 
 impl<Flags, T> Settings<Flags, T>
@@ -65,7 +60,6 @@ where
     /// * `draw_border` - Whether to draw a border around the captured region or not.
     /// * `color_format` - The desired color format for the captured frame.
     /// * `flags` - Additional flags for the capture settings that will be passed to user defined `new` function.
-    /// * `exclude_title_bar` - Whether to attempt to exclude the window's title bar.
     #[must_use]
     #[inline]
     pub const fn new(
@@ -74,7 +68,6 @@ where
         draw_border: DrawBorderSettings,
         color_format: ColorFormat,
         flags: Flags,
-        exclude_title_bar: bool,
     ) -> Self {
         Self {
             item,
@@ -82,7 +75,6 @@ where
             draw_border,
             color_format,
             flags,
-            exclude_title_bar,
         }
     }
 
@@ -139,17 +131,6 @@ where
     #[inline]
     pub const fn flags(&self) -> &Flags {
         &self.flags
-    }
-
-    /// Get the exclude title bar setting
-    ///
-    /// # Returns
-    ///
-    /// True if title bar exclusion is enabled, false otherwise.
-    #[must_use]
-    #[inline]
-    pub const fn exclude_title_bar(&self) -> bool {
-        self.exclude_title_bar
     }
 }
 pub trait AsWindow {

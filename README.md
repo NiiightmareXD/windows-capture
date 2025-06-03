@@ -137,9 +137,6 @@ fn main() {
         DrawBorderSettings::Default,
         // The desired color format for the captured frame.
         ColorFormat::Rgba8,
-        // Specifies whether to exclude the window's title bar from the capture.
-        // This uses GetSystemMetrics(SM_CYCAPTION) for the title bar height.
-        false, // exclude_title_bar: false (default) or true
         // Additional flags for the capture settings that will be passed to user defined `new` function.
         "Yea this works".to_string(),
     );
