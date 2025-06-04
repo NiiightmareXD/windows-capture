@@ -135,8 +135,6 @@
 //!      ColorFormat::Rgba8,
 //!      // Additional flags for the capture settings that will be passed to user defined `new` function.
 //!      "Yea this works".to_string(),
-//!      // Whether to attempt to exclude the window's title bar.
-//!      false,
 //!  );
 //!
 //!  // Starts the capture and takes control of the current thread.
