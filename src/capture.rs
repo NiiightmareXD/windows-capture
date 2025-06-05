@@ -36,7 +36,7 @@ use crate::{
     d3d11::{self, create_d3d_device},
     frame::Frame,
     graphics_capture_api::{self, GraphicsCaptureApi, InternalCaptureControl},
-    settings::Settings,
+    settings::{AsWindow, Settings},
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -165,11 +165,11 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
         if let Some(thread_handle) = self.thread_handle.take() {
             let handle = thread_handle.as_raw_handle();
             let handle = HANDLE(handle);
-            let therad_id = unsafe { GetThreadId(handle) };
+            let thread_id = unsafe { GetThreadId(handle) };
 
             loop {
                 match unsafe {
-                    PostThreadMessageW(therad_id, WM_QUIT, WPARAM::default(), LPARAM::default())
+                    PostThreadMessageW(thread_id, WM_QUIT, WPARAM::default(), LPARAM::default())
                 } {
                     Ok(()) => break,
                     Err(e) => {
@@ -250,7 +250,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
     ///
     /// Returns `Ok(())` if the capture was successful, otherwise returns an error of type `GraphicsCaptureApiError`.
     #[inline]
-    fn start<T: TryInto<GraphicsCaptureItem>>(
+    fn start<T: TryInto<GraphicsCaptureItem> + Send + 'static>(
         settings: Settings<Self::Flags, T>,
     ) -> Result<(), GraphicsCaptureApiError<Self::Error>>
     where
@@ -306,6 +306,8 @@ pub trait GraphicsCaptureApiHandler: Sized {
             Self::new(ctx).map_err(GraphicsCaptureApiError::NewHandlerError)?,
         ));
 
+        let window = settings.item.as_window().cloned();
+
         let item = settings
             .item
             .try_into()
@@ -319,6 +321,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
             settings.cursor_capture,
             settings.draw_border,
             settings.color_format,
+            window,
             thread_id,
             result.clone(),
         )
@@ -446,6 +449,8 @@ pub trait GraphicsCaptureApiHandler: Sized {
                     Self::new(ctx).map_err(GraphicsCaptureApiError::NewHandlerError)?,
                 ));
 
+                let window = settings.item.as_window().cloned();
+
                 let item = settings
                     .item
                     .try_into()
@@ -459,6 +464,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
                     settings.cursor_capture,
                     settings.draw_border,
                     settings.color_format,
+                    window,
                     thread_id,
                     result.clone(),
                 )

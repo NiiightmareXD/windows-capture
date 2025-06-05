@@ -26,6 +26,7 @@ use crate::{
     d3d11::{self, SendDirectX, create_direct3d_device},
     frame::Frame,
     settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings},
+    window::Window,
 };
 
 #[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
@@ -127,6 +128,7 @@ impl GraphicsCaptureApi {
         cursor_capture: CursorCaptureSettings,
         draw_border: DrawBorderSettings,
         color_format: ColorFormat,
+        window: Option<Window>,
         thread_id: u32,
         result: Arc<Mutex<Option<E>>>,
     ) -> Result<Self, Error> {
@@ -144,6 +146,12 @@ impl GraphicsCaptureApi {
         if draw_border != DrawBorderSettings::Default && !Self::is_border_settings_supported()? {
             return Err(Error::BorderConfigUnsupported);
         }
+
+        // Pre-calculate the title bar height so each frame doesn't need to do it
+        let title_bar_height = window
+            .as_ref()
+            .and_then(Window::title_bar_height)
+            .unwrap_or(0);
 
         // Create DirectX devices
         let direct3d_device = create_direct3d_device(&d3d_device)?;
@@ -268,6 +276,7 @@ impl GraphicsCaptureApi {
                     texture_width,
                     texture_height,
                     color_format,
+                    title_bar_height,
                 );
 
                 // Init internal capture control

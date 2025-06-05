@@ -44,6 +44,8 @@ windows = { version = "0.61.1", features = [
     "Win32_System_WinRT_Graphics_Capture",
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_ProcessStatus",
+    "Win32_UI_HiDpi",
+    "Win32_Graphics_Dwm",
 ] } # Windows API
 windows-future = "0.2.1"
 
