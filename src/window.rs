@@ -3,10 +3,10 @@ use std::{ptr, string::FromUtf16Error};
 use windows::{
     Graphics::Capture::GraphicsCaptureItem,
     Win32::{
-        Foundation::{HWND, LPARAM, POINT, RECT, TRUE},
+        Foundation::{HWND, LPARAM, RECT, TRUE},
         Graphics::{
             Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
-            Gdi::{ClientToScreen, MONITOR_DEFAULTTONULL, MonitorFromWindow},
+            Gdi::{MONITOR_DEFAULTTONULL, MonitorFromWindow},
         },
         System::{
             ProcessStatus::GetModuleBaseNameW,
@@ -247,18 +247,19 @@ impl Window {
         let mut client_rect = RECT::default();
 
         unsafe {
-            let _ = DwmGetWindowAttribute(
+            if DwmGetWindowAttribute(
                 self.window,
                 DWMWA_EXTENDED_FRAME_BOUNDS,
                 &mut window_rect as *mut _ as *mut _,
                 std::mem::size_of::<RECT>() as u32,
-            );
-            let _ = GetClientRect(self.window, &mut client_rect);
-        }
-
-        let mut client_point = POINT { x: 0, y: 0 };
-        unsafe {
-            let _ = ClientToScreen(self.window, &mut client_point);
+            )
+            .is_err()
+            {
+                return None;
+            }
+            if GetClientRect(self.window, &mut client_rect).is_err() {
+                return None;
+            }
         }
 
         let window_height = window_rect.bottom - window_rect.top;
