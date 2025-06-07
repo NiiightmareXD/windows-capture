@@ -32,6 +32,13 @@ pub enum DrawBorderSettings {
     WithoutBorder,
 }
 
+#[derive(Eq, PartialEq, Clone, Copy, Debug)]
+pub enum SecondaryWindowSettings {
+    Default,
+    Include,
+    Exclude,
+}
+
 #[derive(Eq, PartialEq, Clone, Debug)]
 /// Represents the settings for screen capturing.
 pub struct Settings<Flags, T: TryInto<GraphicsCaptureItem>> {
@@ -41,6 +48,8 @@ pub struct Settings<Flags, T: TryInto<GraphicsCaptureItem>> {
     pub(crate) cursor_capture: CursorCaptureSettings,
     /// Specifies whether to draw a border around the captured region.
     pub(crate) draw_border: DrawBorderSettings,
+    /// Specifies whether to include secondary windows in the capture.
+    pub(crate) secondary_windows: SecondaryWindowSettings,
     /// The color format for the captured graphics.
     pub(crate) color_format: ColorFormat,
     /// Additional flags for capturing graphics.
@@ -57,15 +66,18 @@ where
     ///
     /// * `item` - The graphics capture item.
     /// * `capture_cursor` - Whether to capture the cursor or not.
-    /// * `draw_border` - Whether to draw a border around the captured region or not.
+    /// * `draw_border` - Whether to draw a border around the captured region or
+    ///   not.
     /// * `color_format` - The desired color format for the captured frame.
-    /// * `flags` - Additional flags for the capture settings that will be passed to user defined `new` function.
+    /// * `flags` - Additional flags for the capture settings that will be
+    ///   passed to user defined `new` function.
     #[must_use]
     #[inline]
     pub const fn new(
         item: T,
         cursor_capture: CursorCaptureSettings,
         draw_border: DrawBorderSettings,
+        secondary_windows: SecondaryWindowSettings,
         color_format: ColorFormat,
         flags: Flags,
     ) -> Self {
@@ -73,6 +85,7 @@ where
             item,
             cursor_capture,
             draw_border,
+            secondary_windows,
             color_format,
             flags,
         }
@@ -109,6 +122,17 @@ where
     #[inline]
     pub const fn draw_border(&self) -> DrawBorderSettings {
         self.draw_border
+    }
+
+    /// Get the secondary window settings
+    ///
+    /// # Returns
+    ///
+    /// The secondary window settings
+    #[must_use]
+    #[inline]
+    pub const fn secondary_windows(&self) -> SecondaryWindowSettings {
+        self.secondary_windows
     }
 
     /// Get the color format

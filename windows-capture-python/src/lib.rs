@@ -13,7 +13,9 @@ use ::windows_capture::{
     frame::{self, Frame},
     graphics_capture_api::InternalCaptureControl,
     monitor::Monitor,
-    settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings, Settings},
+    settings::{
+        ColorFormat, CursorCaptureSettings, DrawBorderSettings, SecondaryWindowSettings, Settings,
+    },
     window::Window,
 };
 use pyo3::{exceptions::PyException, prelude::*, types::PyList};
@@ -129,6 +131,7 @@ pub struct NativeWindowsCapture {
     on_closed: Arc<PyObject>,
     cursor_capture: CursorCaptureSettings,
     draw_border: DrawBorderSettings,
+    secondary_windows: SecondaryWindowSettings,
     monitor_index: Option<usize>,
     window_name: Option<String>,
 }
@@ -136,13 +139,14 @@ pub struct NativeWindowsCapture {
 #[pymethods]
 impl NativeWindowsCapture {
     #[new]
-    #[pyo3(signature = (on_frame_arrived_callback, on_closed, cursor_capture=None, draw_border=None, monitor_index=None, window_name=None))]
+    #[pyo3(signature = (on_frame_arrived_callback, on_closed, cursor_capture=None, draw_border=None, secondary_windows=None, monitor_index=None, window_name=None))]
     #[inline]
     pub fn new(
         on_frame_arrived_callback: PyObject,
         on_closed: PyObject,
         cursor_capture: Option<bool>,
         draw_border: Option<bool>,
+        secondary_windows: Option<bool>,
         mut monitor_index: Option<usize>,
         window_name: Option<String>,
     ) -> PyResult<Self> {
@@ -168,11 +172,18 @@ impl NativeWindowsCapture {
             None => DrawBorderSettings::Default,
         };
 
+        let secondary_windows = match secondary_windows {
+            Some(true) => SecondaryWindowSettings::Include,
+            Some(false) => SecondaryWindowSettings::Exclude,
+            None => SecondaryWindowSettings::Default,
+        };
+
         Ok(Self {
             on_frame_arrived_callback: Arc::new(on_frame_arrived_callback),
             on_closed: Arc::new(on_closed),
             cursor_capture,
             draw_border,
+            secondary_windows,
             monitor_index,
             window_name,
         })
@@ -195,6 +206,7 @@ impl NativeWindowsCapture {
                 window,
                 self.cursor_capture,
                 self.draw_border,
+                self.secondary_windows,
                 ColorFormat::Bgra8,
                 (
                     self.on_frame_arrived_callback.clone(),
@@ -224,6 +236,7 @@ impl NativeWindowsCapture {
                 monitor,
                 self.cursor_capture,
                 self.draw_border,
+                self.secondary_windows,
                 ColorFormat::Bgra8,
                 (
                     self.on_frame_arrived_callback.clone(),
@@ -261,6 +274,7 @@ impl NativeWindowsCapture {
                 window,
                 self.cursor_capture,
                 self.draw_border,
+                self.secondary_windows,
                 ColorFormat::Bgra8,
                 (
                     self.on_frame_arrived_callback.clone(),
@@ -301,6 +315,7 @@ impl NativeWindowsCapture {
                 monitor,
                 self.cursor_capture,
                 self.draw_border,
+                self.secondary_windows,
                 ColorFormat::Bgra8,
                 (
                     self.on_frame_arrived_callback.clone(),
