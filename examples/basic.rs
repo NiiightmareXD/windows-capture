@@ -9,7 +9,9 @@ use windows_capture::{
     frame::Frame,
     graphics_capture_api::InternalCaptureControl,
     monitor::Monitor,
-    settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings, Settings},
+    settings::{
+        ColorFormat, CursorCaptureSettings, DrawBorderSettings, SecondaryWindowSettings, Settings,
+    },
 };
 
 // Handles capture events.
@@ -24,10 +26,12 @@ impl GraphicsCaptureApiHandler for Capture {
     // The type of flags used to get the values from the settings.
     type Flags = String;
 
-    // The type of error that can be returned from `CaptureControl` and `start` functions.
+    // The type of error that can be returned from `CaptureControl` and `start`
+    // functions.
     type Error = Box<dyn std::error::Error + Send + Sync>;
 
-    // Function that will be called to create a new instance. The flags can be passed from settings.
+    // Function that will be called to create a new instance. The flags can be
+    // passed from settings.
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
         println!("Created with Flags: {}", ctx.flags);
 
@@ -59,10 +63,10 @@ impl GraphicsCaptureApiHandler for Capture {
         // Send the frame to the video encoder
         self.encoder.as_mut().unwrap().send_frame(frame)?;
 
-        // Note: The frame has other uses too, for example, you can save a single frame to a file, like this:
-        // frame.save_as_image("frame.png", ImageFormat::Png)?;
-        // Or get the raw data like this so you have full control:
-        // let data = frame.buffer()?;
+        // Note: The frame has other uses too, for example, you can save a single frame
+        // to a file, like this: frame.save_as_image("frame.png",
+        // ImageFormat::Png)?; Or get the raw data like this so you have full
+        // control: let data = frame.buffer()?;
 
         // Stop the capture after 6 seconds
         if self.start.elapsed().as_secs() >= 6 {
@@ -97,9 +101,12 @@ fn main() {
         CursorCaptureSettings::Default,
         // Draw border settings
         DrawBorderSettings::Default,
+        // Secondary window settings,
+        SecondaryWindowSettings::Default,
         // The desired color format for the captured frame.
         ColorFormat::Rgba8,
-        // Additional flags for the capture settings that will be passed to user defined `new` function.
+        // Additional flags for the capture settings that will be passed to user defined `new`
+        // function.
         "Yea this works".to_string(),
     );
 
