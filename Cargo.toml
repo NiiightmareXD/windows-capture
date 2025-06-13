@@ -19,7 +19,7 @@ categories = [
 resolver = "2"
 
 [dependencies]
-windows = { version = "0.61.1", features = [
+windows = { version = "0.61.3", features = [
     "Foundation_Metadata",
     "Foundation",
     "Graphics_Capture",
