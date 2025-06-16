@@ -1,4 +1,8 @@
+use std::any::Any;
+
 use windows::Graphics::Capture::GraphicsCaptureItem;
+
+use crate::window::Window;
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub enum ColorFormat {
@@ -43,7 +47,10 @@ pub struct Settings<Flags, T: TryInto<GraphicsCaptureItem>> {
     pub(crate) flags: Flags,
 }
 
-impl<Flags, T: TryInto<GraphicsCaptureItem>> Settings<Flags, T> {
+impl<Flags, T> Settings<Flags, T>
+where
+    T: TryInto<GraphicsCaptureItem> + Any + 'static,
+{
     /// Create Capture Settings
     ///
     /// # Arguments
@@ -124,5 +131,14 @@ impl<Flags, T: TryInto<GraphicsCaptureItem>> Settings<Flags, T> {
     #[inline]
     pub const fn flags(&self) -> &Flags {
         &self.flags
+    }
+}
+pub trait AsWindow {
+    fn as_window(&self) -> Option<&Window>;
+}
+
+impl<T: Any> AsWindow for T {
+    fn as_window(&self) -> Option<&Window> {
+        (self as &dyn Any).downcast_ref::<Window>()
     }
 }

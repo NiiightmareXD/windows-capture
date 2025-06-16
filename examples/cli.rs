@@ -1,8 +1,8 @@
 use std::{
     io::{self, Write},
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -190,7 +190,7 @@ fn start_capture<T>(
     draw_border: DrawBorderSettings,
     settings: CaptureSettings,
 ) where
-    T: TryInto<GraphicsCaptureItem>,
+    T: TryInto<GraphicsCaptureItem> + Send + 'static,
 {
     let capture_settings = Settings::new(
         capture_item,

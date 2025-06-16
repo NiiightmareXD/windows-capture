@@ -11,9 +11,9 @@ use windows::{
     Graphics::DirectX::Direct3D11::IDirect3DSurface,
     Win32::Graphics::{
         Direct3D11::{
-            ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_BOX, D3D11_CPU_ACCESS_READ,
-            D3D11_CPU_ACCESS_WRITE, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ_WRITE,
-            D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
+            D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CPU_ACCESS_WRITE, D3D11_MAP_READ_WRITE,
+            D3D11_MAPPED_SUBRESOURCE, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, ID3D11Device,
+            ID3D11DeviceContext, ID3D11Texture2D,
         },
         Dxgi::Common::{DXGI_FORMAT, DXGI_SAMPLE_DESC},
     },
@@ -66,6 +66,7 @@ pub struct Frame<'a> {
     width: u32,
     height: u32,
     color_format: ColorFormat,
+    title_bar_height: u32,
 }
 
 impl<'a> Frame<'a> {
@@ -99,6 +100,7 @@ impl<'a> Frame<'a> {
         width: u32,
         height: u32,
         color_format: ColorFormat,
+        title_bar_height: u32,
     ) -> Self {
         Self {
             d3d_device,
@@ -110,6 +112,7 @@ impl<'a> Frame<'a> {
             width,
             height,
             color_format,
+            title_bar_height,
         }
     }
 
@@ -365,6 +368,20 @@ impl<'a> Frame<'a> {
         );
 
         Ok(frame_buffer)
+    }
+
+    /// Get the frame buffer without the title bar.Add commentMore actions
+    ///
+    /// # Returns
+    ///
+    /// The FrameBuffer containing the frame data without the title bar.
+    #[inline]
+    pub fn buffer_without_title_bar(&mut self) -> Result<FrameBuffer, Error> {
+        if self.title_bar_height > 0 && self.height > self.title_bar_height {
+            return self.buffer_crop(0, self.title_bar_height, self.width, self.height);
+        } else {
+            return self.buffer();
+        }
     }
 
     /// Save the frame buffer as an image to the specified path.
