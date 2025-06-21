@@ -24,6 +24,8 @@ class Frame:
         Height Of The Frame
     timespan : int
         Timespan Of The Frame
+    title_bar_height : int
+        Height Of The Title Bar
 
     Methods
     -------
@@ -35,14 +37,17 @@ class Frame:
         start_width : int, start_height : int, end_width : int, end_height : int
     ) -> "Frame":
         Converts The self.frame_buffer Pixel Type To Bgr Instead Of Bgra
+    frame_buffer_without_title_bar:
+        Returns Cropped Buffer Without Title Bar
     """
 
-    def __init__(self, frame_buffer: numpy.ndarray, width: int, height: int, timespan: int) -> None:
+    def __init__(self, frame_buffer: numpy.ndarray, width: int, height: int, timespan: int, title_bar_height: int) -> None:
         """Constructs All The Necessary Attributes For The Frame Object"""
         self.frame_buffer = frame_buffer
         self.width = width
         self.height = height
         self.timespan = timespan
+        self.title_bar_height = title_bar_height
 
     def save_as_image(self, path: str) -> None:
         """Save The Frame As An Image To The Specified Path"""
@@ -52,7 +57,7 @@ class Frame:
         """Converts The self.frame_buffer Pixel Type To Bgr Instead Of Bgra"""
         bgr_frame_buffer = self.frame_buffer[:, :, :3]
 
-        return Frame(bgr_frame_buffer, self.width, self.height, self.timespan)
+        return Frame(bgr_frame_buffer, self.width, self.height, self.timespan, self.title_bar_height)
 
     def crop(
         self, start_width: int, start_height: int, end_width: int, end_height: int
@@ -63,9 +68,16 @@ class Frame:
         ]
 
         return Frame(
-            cropped_frame_buffer, end_width - start_width, end_height - start_height, self.timespan
+            cropped_frame_buffer, end_width - start_width, end_height - start_height, self.timespan,  0
         )
 
+    @property
+    def frame_buffer_without_title_bar(self) -> numpy.ndarray:
+        """Returns The Frame Buffer Cropped To Exclude The Title Bar."""
+        if 0 < self.title_bar_height < self.frame_buffer.shape[0]:
+            return self.frame_buffer[self.title_bar_height:, :, :]
+        else:
+            return self.frame_buffer
 
 class InternalCaptureControl:
     """
@@ -227,6 +239,7 @@ class WindowsCapture:
         height: int,
         stop_list: list,
         timespan: int,
+        title_bar_height: int,
     ) -> None:
         """This Method Is Called Before The on_frame_arrived Callback Function To
         Prepare Data"""
@@ -240,7 +253,7 @@ class WindowsCapture:
                     shape=(height, width, 4),
                 )
 
-                frame = Frame(ndarray, width, height, timespan)
+                frame = Frame(ndarray, width, height, timespan, title_bar_height)
                 self.frame_handler(frame, internal_capture_control)
             else:
                 ndarray = numpy.ctypeslib.as_array(
@@ -248,7 +261,7 @@ class WindowsCapture:
                     shape=(height, row_pitch),
                 )[:, : width * 4].reshape(height, width, 4)
 
-                frame = Frame(ndarray, width, height, timespan)
+                frame = Frame(ndarray, width, height, timespan, title_bar_height)
                 self.frame_handler(frame, internal_capture_control)
 
                 self.frame_handler(

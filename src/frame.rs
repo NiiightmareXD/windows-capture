@@ -160,6 +160,17 @@ impl<'a> Frame<'a> {
         self.color_format
     }
 
+    /// Get the title bar height of the frame.
+    ///
+    /// # Returns
+    ///
+    /// The height of the window title bar.
+    #[must_use]
+    #[inline]
+    pub const fn title_bar_height(&self) -> u32 {
+        self.title_bar_height
+    }
+
     /// Get the raw surface of the frame.
     ///
     /// # Returns
