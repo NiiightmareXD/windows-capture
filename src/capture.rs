@@ -147,11 +147,9 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
             let handle = thread_handle.as_raw_handle();
             let handle = HANDLE(handle);
             let thread_id = unsafe { GetThreadId(handle) };
-            let thread_id = unsafe { GetThreadId(handle) };
 
             loop {
                 match unsafe {
-                    PostThreadMessageW(thread_id, WM_QUIT, WPARAM::default(), LPARAM::default())
                     PostThreadMessageW(thread_id, WM_QUIT, WPARAM::default(), LPARAM::default())
                 } {
                     Ok(()) => break,

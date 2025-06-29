@@ -52,6 +52,8 @@ pub enum Error {
     AlreadyStarted,
     #[error("DirectX error: {0}")]
     DirectXError(#[from] d3d11::Error),
+    #[error("Window error: {0}")]
+    WindowError(#[from] crate::window::Error),
     #[error("Windows API error: {0}")]
     WindowsError(#[from] windows::core::Error),
 }
@@ -148,7 +150,6 @@ impl GraphicsCaptureApi {
         minimum_update_interval_settings: MinimumUpdateIntervalSettings,
         dirty_region_settings: DirtyRegionSettings,
         color_format: ColorFormat,
-        window: Option<Window>,
         thread_id: u32,
         result: Arc<Mutex<Option<E>>>,
     ) -> Result<Self, Error> {
@@ -189,7 +190,7 @@ impl GraphicsCaptureApi {
 
         // Pre-calculate the title bar height so each frame doesn't need to do it
         let title_bar_height = match item_type {
-            CaptureItemTypes::Window(window) => window.title_bar_height(),
+            CaptureItemTypes::Window(window) => Some(window.title_bar_height()?),
             CaptureItemTypes::Monitor(_) => None,
         };
 
@@ -317,7 +318,6 @@ impl GraphicsCaptureApi {
                     texture_width,
                     texture_height,
                     color_format,
-                    title_bar_height,
                     title_bar_height,
                 );
 

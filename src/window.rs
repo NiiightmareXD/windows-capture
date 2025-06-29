@@ -1,5 +1,4 @@
 use std::ptr;
-use std::string::FromUtf16Error;
 
 use windows::Graphics::Capture::GraphicsCaptureItem;
 use windows::Win32::Foundation::{HWND, LPARAM, RECT, TRUE};
@@ -21,14 +20,14 @@ use windows::core::{BOOL, HSTRING, Owned};
 use crate::monitor::Monitor;
 use crate::settings::{CaptureItemTypes, TryIntoCaptureItemWithType};
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
 pub enum Error {
     #[error("No active window found.")]
     NoActiveWindow,
     #[error("Failed to find a window with the name: {0}")]
     NotFound(String),
-    #[error("Failed to convert a Windows string from UTF-16: {0}")]
-    FailedToConvertWindowsString(#[from] FromUtf16Error),
+    #[error("Failed to convert a Windows string from UTF-16")]
+    FailedToConvertWindowsString,
     #[error("A Windows API call failed: {0}")]
     WindowsError(#[from] windows::core::Error),
 }
@@ -134,7 +133,8 @@ impl Window {
 
         let name = String::from_utf16(
             &name.as_slice().iter().take_while(|ch| **ch != 0x0000).copied().collect::<Vec<u16>>(),
-        )?;
+        )
+        .map_err(|_| Error::FailedToConvertWindowsString)?;
 
         Ok(name)
     }
@@ -180,7 +180,8 @@ impl Window {
 
         let name = String::from_utf16(
             &name.as_slice().iter().take_while(|ch| **ch != 0x0000).copied().collect::<Vec<u16>>(),
-        )?;
+        )
+        .map_err(|_| Error::FailedToConvertWindowsString)?;
 
         Ok(name)
     }
@@ -216,35 +217,31 @@ impl Window {
 
     /// Calculates the height of the window's title bar in pixels.
     ///
-    /// Returns `None` if the title bar height cannot be determined.
-    #[must_use]
+    /// # Errors
+    ///
+    /// Returns `Error` if the title bar height cannot be determined.
     #[inline]
-    pub fn title_bar_height(&self) -> Option<u32> {
+    pub fn title_bar_height(&self) -> Result<u32, Error> {
         let mut window_rect = RECT::default();
         let mut client_rect = RECT::default();
 
         unsafe {
-            if DwmGetWindowAttribute(
+            DwmGetWindowAttribute(
                 self.window,
                 DWMWA_EXTENDED_FRAME_BOUNDS,
-                &mut window_rect as *mut _ as *mut _,
+                &mut window_rect as *mut RECT as *mut std::ffi::c_void,
                 std::mem::size_of::<RECT>() as u32,
             )
-            .is_err()
-            {
-                return None;
-            }
-            if GetClientRect(self.window, &mut client_rect).is_err() {
-                return None;
-            }
-        }
+        }?;
+
+        unsafe { GetClientRect(self.window, &mut client_rect) }?;
 
         let window_height = window_rect.bottom - window_rect.top;
         let dpi = unsafe { GetDpiForWindow(self.window) };
         let client_height = (client_rect.bottom - client_rect.top) * dpi as i32 / 96;
         let actual_title_height = (window_height - client_height) as i32;
 
-        if actual_title_height > 0 { Some(actual_title_height as u32) } else { None }
+        Ok(actual_title_height as u32)
     }
 
     /// Checks if the window is a valid target for capture.
