@@ -1,23 +1,17 @@
-use windows::{
-    Graphics::DirectX::Direct3D11::IDirect3DDevice,
-    Win32::{
-        Foundation::HMODULE,
-        Graphics::{
-            Direct3D::{
-                D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_9_1,
-                D3D_FEATURE_LEVEL_9_2, D3D_FEATURE_LEVEL_9_3, D3D_FEATURE_LEVEL_10_0,
-                D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
-            },
-            Direct3D11::{
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice,
-                ID3D11Device, ID3D11DeviceContext,
-            },
-            Dxgi::IDXGIDevice,
-        },
-        System::WinRT::Direct3D11::CreateDirect3D11DeviceFromDXGIDevice,
-    },
-    core::Interface,
+use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
+use windows::Win32::Foundation::HMODULE;
+use windows::Win32::Graphics::Direct3D::{
+    D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_9_1, D3D_FEATURE_LEVEL_9_2,
+    D3D_FEATURE_LEVEL_9_3, D3D_FEATURE_LEVEL_10_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_11_0,
+    D3D_FEATURE_LEVEL_11_1,
 };
+use windows::Win32::Graphics::Direct3D11::{
+    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice, ID3D11Device,
+    ID3D11DeviceContext,
+};
+use windows::Win32::Graphics::Dxgi::IDXGIDevice;
+use windows::Win32::System::WinRT::Direct3D11::CreateDirect3D11DeviceFromDXGIDevice;
+use windows::core::Interface;
 
 #[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
 pub enum Error {
@@ -27,19 +21,19 @@ pub enum Error {
     WindowsError(#[from] windows::core::Error),
 }
 
-/// Used To Send DirectX Device Across Threads
+/// A wrapper to send a DirectX device across threads.
 pub struct SendDirectX<T>(pub T);
 
 impl<T> SendDirectX<T> {
-    /// Create A New `SendDirectX` Instance
+    /// Creates a new `SendDirectX` instance.
     ///
     /// # Arguments
     ///
-    /// * `device` - The DirectX Device
+    /// * `device` - The DirectX device.
     ///
     /// # Returns
     ///
-    /// Returns A New `SendDirectX` Instance
+    /// Returns a new `SendDirectX` instance.
     #[must_use]
     #[inline]
     pub const fn new(device: T) -> Self {
@@ -50,7 +44,7 @@ impl<T> SendDirectX<T> {
 #[allow(clippy::non_send_fields_in_send_ty)]
 unsafe impl<T> Send for SendDirectX<T> {}
 
-/// Create `ID3D11Device` and `ID3D11DeviceContext`
+/// Creates an `ID3D11Device` and an `ID3D11DeviceContext`.
 #[inline]
 pub fn create_d3d_device() -> Result<(ID3D11Device, ID3D11DeviceContext), Error> {
     // Array of Direct3D feature levels.
@@ -91,7 +85,7 @@ pub fn create_d3d_device() -> Result<(ID3D11Device, ID3D11DeviceContext), Error>
     Ok((d3d_device.unwrap(), d3d_device_context.unwrap()))
 }
 
-/// Create `IDirect3DDevice` From `ID3D11Device`
+/// Creates an `IDirect3DDevice` from an `ID3D11Device`.
 #[inline]
 pub fn create_direct3d_device(d3d_device: &ID3D11Device) -> Result<IDirect3DDevice, Error> {
     let dxgi_device: IDXGIDevice = d3d_device.cast()?;

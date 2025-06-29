@@ -1,49 +1,35 @@
-use std::{
-    mem,
-    os::windows::prelude::AsRawHandle,
-    sync::{
-        Arc, OnceLock,
-        atomic::{self, AtomicBool},
-        mpsc,
-    },
-    thread::{self, JoinHandle},
-};
+use std::mem;
+use std::os::windows::prelude::AsRawHandle;
+use std::sync::atomic::{self, AtomicBool};
+use std::sync::{Arc, OnceLock, mpsc};
+use std::thread::{self, JoinHandle};
 
 use parking_lot::Mutex;
-use windows::{
-    Graphics::Capture::GraphicsCaptureItem,
-    Win32::{
-        Foundation::{HANDLE, LPARAM, S_FALSE, WPARAM},
-        Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext},
-        System::{
-            Com::CoIncrementMTAUsage,
-            Threading::{GetCurrentThreadId, GetThreadId},
-            WinRT::{
-                CreateDispatcherQueueController, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT,
-                DispatcherQueueOptions, RO_INIT_MULTITHREADED, RoInitialize,
-            },
-        },
-        UI::WindowsAndMessaging::{
-            DispatchMessageW, GetMessageW, MSG, PostQuitMessage, PostThreadMessageW,
-            TranslateMessage, WM_QUIT,
-        },
-    },
-    core::Result as WindowsResult,
+use windows::Win32::Foundation::{HANDLE, LPARAM, S_FALSE, WPARAM};
+use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext};
+use windows::Win32::System::Com::CoIncrementMTAUsage;
+use windows::Win32::System::Threading::{GetCurrentThreadId, GetThreadId};
+use windows::Win32::System::WinRT::{
+    CreateDispatcherQueueController, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, DispatcherQueueOptions,
+    RO_INIT_MULTITHREADED, RoInitialize,
 };
+use windows::Win32::UI::WindowsAndMessaging::{
+    DispatchMessageW, GetMessageW, MSG, PostQuitMessage, PostThreadMessageW, TranslateMessage,
+    WM_QUIT,
+};
+use windows::core::Result as WindowsResult;
 use windows_future::AsyncActionCompletedHandler;
 
-use crate::{
-    d3d11::{self, create_d3d_device},
-    frame::Frame,
-    graphics_capture_api::{self, GraphicsCaptureApi, InternalCaptureControl},
-    settings::Settings,
-};
+use crate::d3d11::{self, create_d3d_device};
+use crate::frame::Frame;
+use crate::graphics_capture_api::{self, GraphicsCaptureApi, InternalCaptureControl};
+use crate::settings::{Settings, TryIntoCaptureItemWithType};
 
 #[derive(thiserror::Error, Debug)]
 pub enum CaptureControlError<E> {
     #[error("Failed to join thread")]
     FailedToJoinThread,
-    #[error("Thread handle is taken out of struct")]
+    #[error("Thread handle is taken out of the struct")]
     ThreadHandleIsTaken,
     #[error("Failed to post thread message")]
     FailedToPostThreadMessage,
@@ -71,7 +57,7 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
     ///
     /// # Returns
     ///
-    /// The newly created CaptureControl struct.
+    /// The newly created `CaptureControl` struct.
     #[must_use]
     #[inline]
     pub const fn new(
@@ -79,11 +65,7 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
         halt_handle: Arc<AtomicBool>,
         callback: Arc<Mutex<T>>,
     ) -> Self {
-        Self {
-            thread_handle: Some(thread_handle),
-            halt_handle,
-            callback,
-        }
+        Self { thread_handle: Some(thread_handle), halt_handle, callback }
     }
 
     /// Checks to see if the capture thread is finished.
@@ -94,9 +76,7 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
     #[must_use]
     #[inline]
     pub fn is_finished(&self) -> bool {
-        self.thread_handle
-            .as_ref()
-            .is_none_or(std::thread::JoinHandle::is_finished)
+        self.thread_handle.as_ref().is_none_or(std::thread::JoinHandle::is_finished)
     }
 
     /// Gets the join handle for the capture thread.
@@ -132,7 +112,7 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
         self.callback.clone()
     }
 
-    /// Waits until the capturing thread stops.
+    /// Waits for the capturing thread to stop.
     ///
     /// # Returns
     ///
@@ -165,11 +145,11 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
         if let Some(thread_handle) = self.thread_handle.take() {
             let handle = thread_handle.as_raw_handle();
             let handle = HANDLE(handle);
-            let therad_id = unsafe { GetThreadId(handle) };
+            let thread_id = unsafe { GetThreadId(handle) };
 
             loop {
                 match unsafe {
-                    PostThreadMessageW(therad_id, WM_QUIT, WPARAM::default(), LPARAM::default())
+                    PostThreadMessageW(thread_id, WM_QUIT, WPARAM::default(), LPARAM::default())
                 } {
                     Ok(()) => break,
                     Err(e) => {
@@ -206,11 +186,11 @@ pub enum GraphicsCaptureApiError<E> {
     FailedToInitWinRT,
     #[error("Failed to create dispatcher queue controller")]
     FailedToCreateDispatcherQueueController,
-    #[error("Failed to shutdown dispatcher queue")]
+    #[error("Failed to shut down dispatcher queue")]
     FailedToShutdownDispatcherQueue,
     #[error("Failed to set dispatcher queue completed handler")]
     FailedToSetDispatcherQueueCompletedHandler,
-    #[error("Failed to convert item to GraphicsCaptureItem")]
+    #[error("Failed to convert item to `GraphicsCaptureItem`")]
     ItemConvertFailed,
     #[error("DirectX error: {0}")]
     DirectXError(#[from] d3d11::Error),
@@ -224,11 +204,11 @@ pub enum GraphicsCaptureApiError<E> {
 
 /// A struct representing the context of the capture handler.
 pub struct Context<Flags> {
-    /// The flags that are gotten from the settings.
+    /// The flags that are retrieved from the settings.
     pub flags: Flags,
-    /// The direct3d device and context.
+    /// The Direct3D device.
     pub device: ID3D11Device,
-    /// The direct3d device context.
+    /// The Direct3D device context.
     pub device_context: ID3D11DeviceContext,
 }
 
@@ -237,7 +217,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
     /// The type of flags used to get the values from the settings.
     type Flags;
 
-    /// The type of error that can occur during capture, the error will be returned from `CaptureControl` and `start` functions.
+    /// The type of error that can occur during capture. The error will be returned from the `CaptureControl` and `start` functions.
     type Error: Send + Sync;
 
     /// Starts the capture and takes control of the current thread.
@@ -248,9 +228,9 @@ pub trait GraphicsCaptureApiHandler: Sized {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the capture was successful, otherwise returns an error of type `GraphicsCaptureApiError`.
+    /// Returns `Ok(())` if the capture was successful; otherwise, it returns an error of type `GraphicsCaptureApiError`.
     #[inline]
-    fn start<T: TryInto<GraphicsCaptureItem>>(
+    fn start<T: TryIntoCaptureItemWithType>(
         settings: Settings<Self::Flags, T>,
     ) -> Result<(), GraphicsCaptureApiError<Self::Error>>
     where
@@ -302,30 +282,32 @@ pub trait GraphicsCaptureApiHandler: Sized {
             device_context: d3d_device_context.clone(),
         };
 
-        let callback = Arc::new(Mutex::new(
-            Self::new(ctx).map_err(GraphicsCaptureApiError::NewHandlerError)?,
-        ));
+        let callback =
+            Arc::new(Mutex::new(Self::new(ctx).map_err(GraphicsCaptureApiError::NewHandlerError)?));
 
-        let item = settings
+        // Convert the item into a GraphicsCaptureItem and its type
+        let (item, item_type) = settings
             .item
-            .try_into()
+            .try_into_capture_item()
             .map_err(|_| GraphicsCaptureApiError::ItemConvertFailed)?;
 
         let mut capture = GraphicsCaptureApi::new(
             d3d_device,
             d3d_device_context,
             item,
+            item_type,
             callback,
-            settings.cursor_capture,
-            settings.draw_border,
+            settings.cursor_capture_settings,
+            settings.draw_border_settings,
+            settings.secondary_window_settings,
+            settings.minimum_update_interval_settings,
+            settings.dirty_region_settings,
             settings.color_format,
             thread_id,
             result.clone(),
         )
         .map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?;
-        capture
-            .start_capture()
-            .map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?;
+        capture.start_capture().map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?;
 
         // Message loop
         let mut message = MSG::default();
@@ -342,12 +324,10 @@ pub trait GraphicsCaptureApiHandler: Sized {
             .map_err(|_| GraphicsCaptureApiError::FailedToShutdownDispatcherQueue)?;
 
         async_action
-            .SetCompleted(&AsyncActionCompletedHandler::new(
-                move |_, _| -> WindowsResult<()> {
-                    unsafe { PostQuitMessage(0) };
-                    Ok(())
-                },
-            ))
+            .SetCompleted(&AsyncActionCompletedHandler::new(move |_, _| -> WindowsResult<()> {
+                unsafe { PostQuitMessage(0) };
+                Ok(())
+            }))
             .map_err(|_| GraphicsCaptureApiError::FailedToSetDispatcherQueueCompletedHandler)?;
 
         // Final message loop
@@ -382,9 +362,9 @@ pub trait GraphicsCaptureApiHandler: Sized {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(CaptureControl)` if the capture was successful, otherwise returns an error of type `GraphicsCaptureApiError`.
+    /// Returns a `Result` containing the `CaptureControl` if the capture was successful; otherwise, it returns an error of type `GraphicsCaptureApiError`.
     #[inline]
-    fn start_free_threaded<T: TryInto<GraphicsCaptureItem> + Send + 'static>(
+    fn start_free_threaded<T: TryIntoCaptureItemWithType + Send + 'static>(
         settings: Settings<Self::Flags, T>,
     ) -> Result<CaptureControl<Self, Self::Error>, GraphicsCaptureApiError<Self::Error>>
     where
@@ -394,8 +374,8 @@ pub trait GraphicsCaptureApiHandler: Sized {
         let (halt_sender, halt_receiver) = mpsc::channel::<Arc<AtomicBool>>();
         let (callback_sender, callback_receiver) = mpsc::channel::<Arc<Mutex<Self>>>();
 
-        let thread_handle = thread::spawn(
-            move || -> Result<(), GraphicsCaptureApiError<Self::Error>> {
+        let thread_handle =
+            thread::spawn(move || -> Result<(), GraphicsCaptureApiError<Self::Error>> {
                 // Initialize WinRT
                 static INIT_MTA: OnceLock<()> = OnceLock::new();
                 INIT_MTA.get_or_init(|| {
@@ -446,18 +426,23 @@ pub trait GraphicsCaptureApiHandler: Sized {
                     Self::new(ctx).map_err(GraphicsCaptureApiError::NewHandlerError)?,
                 ));
 
-                let item = settings
+                // Convert the item into a GraphicsCaptureItem and its type
+                let (item, item_type) = settings
                     .item
-                    .try_into()
+                    .try_into_capture_item()
                     .map_err(|_| GraphicsCaptureApiError::ItemConvertFailed)?;
 
                 let mut capture = GraphicsCaptureApi::new(
                     d3d_device,
                     d3d_device_context,
                     item,
+                    item_type,
                     callback.clone(),
-                    settings.cursor_capture,
-                    settings.draw_border,
+                    settings.cursor_capture_settings,
+                    settings.draw_border_settings,
+                    settings.secondary_window_settings,
+                    settings.minimum_update_interval_settings,
+                    settings.dirty_region_settings,
                     settings.color_format,
                     thread_id,
                     result.clone(),
@@ -522,8 +507,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
                 }
 
                 Ok(())
-            },
-        );
+            });
 
         let Ok(halt_handle) = halt_receiver.recv() else {
             match thread_handle.join() {
@@ -554,7 +538,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(Self)` if the struct creation was successful, otherwise returns an error of type `Self::Error`.
+    /// Returns `Ok(Self)` if the struct creation was successful; otherwise, it returns an error of type `Self::Error`.
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error>;
 
     /// Called every time a new frame is available.
@@ -566,7 +550,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the frame processing was successful, otherwise returns an error of type `Self::Error`.
+    /// Returns `Ok(())` if the frame processing was successful; otherwise, it returns an error of type `Self::Error`.
     fn on_frame_arrived(
         &mut self,
         frame: &mut Frame,
@@ -577,7 +561,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the handler execution was successful, otherwise returns an error of type `Self::Error`.
+    /// Returns `Ok(())` if the handler executed successfully; otherwise, it returns an error of type `Self::Error`.
     #[inline]
     fn on_closed(&mut self) -> Result<(), Self::Error> {
         Ok(())

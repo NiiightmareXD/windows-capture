@@ -1,66 +1,51 @@
-use std::{
-    fs::{self, File},
-    path::Path,
-    slice,
-    sync::{
-        Arc,
-        atomic::{self, AtomicBool},
-        mpsc,
-    },
-    thread::{self, JoinHandle},
-};
+use std::fs::{self, File};
+use std::path::Path;
+use std::slice;
+use std::sync::atomic::{self, AtomicBool};
+use std::sync::{Arc, mpsc};
+use std::thread::{self, JoinHandle};
 
 use parking_lot::{Condvar, Mutex};
-use windows::{
-    Foundation::{TimeSpan, TypedEventHandler},
-    Graphics::{
-        DirectX::Direct3D11::IDirect3DSurface,
-        Imaging::{BitmapAlphaMode, BitmapEncoder, BitmapPixelFormat},
-    },
-    Media::{
-        Core::{
-            AudioStreamDescriptor, MediaStreamSample, MediaStreamSource,
-            MediaStreamSourceSampleRequestedEventArgs, MediaStreamSourceStartingEventArgs,
-            VideoStreamDescriptor,
-        },
-        MediaProperties::{
-            AudioEncodingProperties, ContainerEncodingProperties, MediaEncodingProfile,
-            MediaEncodingSubtypes, VideoEncodingProperties,
-        },
-        Transcoding::MediaTranscoder,
-    },
-    Security::Cryptography::CryptographicBuffer,
-    Storage::{
-        FileAccessMode, StorageFile,
-        Streams::{
-            Buffer, DataReader, IRandomAccessStream, InMemoryRandomAccessStream, InputStreamOptions,
-        },
-    },
-    core::{HSTRING, Interface},
+use windows::Foundation::{TimeSpan, TypedEventHandler};
+use windows::Graphics::DirectX::Direct3D11::IDirect3DSurface;
+use windows::Graphics::Imaging::{BitmapAlphaMode, BitmapEncoder, BitmapPixelFormat};
+use windows::Media::Core::{
+    AudioStreamDescriptor, MediaStreamSample, MediaStreamSource,
+    MediaStreamSourceSampleRequestedEventArgs, MediaStreamSourceStartingEventArgs,
+    VideoStreamDescriptor,
 };
+use windows::Media::MediaProperties::{
+    AudioEncodingProperties, ContainerEncodingProperties, MediaEncodingProfile,
+    MediaEncodingSubtypes, VideoEncodingProperties,
+};
+use windows::Media::Transcoding::MediaTranscoder;
+use windows::Security::Cryptography::CryptographicBuffer;
+use windows::Storage::Streams::{
+    Buffer, DataReader, IRandomAccessStream, InMemoryRandomAccessStream, InputStreamOptions,
+};
+use windows::Storage::{FileAccessMode, StorageFile};
+use windows::core::{HSTRING, Interface};
 
-use crate::{
-    d3d11::SendDirectX,
-    frame::{Frame, ImageFormat},
-    settings::ColorFormat,
-};
+use crate::d3d11::SendDirectX;
+use crate::frame::{Frame, ImageFormat};
+use crate::settings::ColorFormat;
 
 #[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
 pub enum ImageEncoderError {
-    #[error("This color format is not supported for saving as image")]
+    #[error("This color format is not supported for saving as an image")]
     UnsupportedFormat,
-    #[error("Windows API Error: {0}")]
+    #[error("Windows API error: {0}")]
     WindowsError(#[from] windows::core::Error),
 }
 
-/// The `ImageEncoder` struct represents an image encoder that can be used to encode image buffers to image bytes with a specified format and color format.
+/// The `ImageEncoder` struct is used to encode image buffers into image bytes with a specified format and color format.
 pub struct ImageEncoder {
     format: ImageFormat,
     color_format: ColorFormat,
 }
 
 impl ImageEncoder {
-    /// Create a new ImageEncoder with the specified format and color format.
+    /// Creates a new `ImageEncoder` with the specified format and color format.
     ///
     /// # Arguments
     ///
@@ -73,13 +58,10 @@ impl ImageEncoder {
     #[must_use]
     #[inline]
     pub const fn new(format: ImageFormat, color_format: ColorFormat) -> Self {
-        Self {
-            format,
-            color_format,
-        }
+        Self { format, color_format }
     }
 
-    /// Encode the image buffer to image bytes with the specified format.
+    /// Encodes the image buffer into image bytes with the specified format.
     ///
     /// # Arguments
     ///
@@ -93,7 +75,7 @@ impl ImageEncoder {
     ///
     /// # Errors
     ///
-    /// Returns an `Error` if the encoding fails or if the color format is unsupported.
+    /// Returns an `ImageEncoderError` if the encoding fails or if the color format is unsupported.
     #[inline]
     pub fn encode(
         &self,
@@ -132,9 +114,7 @@ impl ImageEncoder {
         encoder.FlushAsync()?.get()?;
 
         let buffer = Buffer::Create(u32::try_from(stream.Size()?).unwrap())?;
-        stream
-            .ReadAsync(&buffer, buffer.Capacity()?, InputStreamOptions::None)?
-            .get()?;
+        stream.ReadAsync(&buffer, buffer.Capacity()?, InputStreamOptions::None)?.get()?;
 
         let data_reader = DataReader::FromBuffer(&buffer)?;
         let length = data_reader.UnconsumedBufferLength()?;
@@ -147,35 +127,35 @@ impl ImageEncoder {
 
 #[derive(thiserror::Error, Debug)]
 pub enum VideoEncoderError {
-    #[error("Windows API Error: {0}")]
+    #[error("Windows API error: {0}")]
     WindowsError(#[from] windows::core::Error),
-    #[error("Frame send error: {0}")]
+    #[error("Failed to send frame: {0}")]
     FrameSendError(#[from] mpsc::SendError<Option<(VideoEncoderSource, TimeSpan)>>),
-    #[error("Audio send error: {0}")]
+    #[error("Failed to send audio: {0}")]
     AudioSendError(#[from] mpsc::SendError<Option<(AudioEncoderSource, TimeSpan)>>),
-    #[error("Video is disabled")]
+    #[error("Video encoding is disabled")]
     VideoDisabled,
-    #[error("Audio is disabled")]
+    #[error("Audio encoding is disabled")]
     AudioDisabled,
-    #[error("IO Error: {0}")]
+    #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
 }
 
 unsafe impl Send for VideoEncoderError {}
 unsafe impl Sync for VideoEncoderError {}
 
-/// The `VideoEncoderSource` struct represents all the types that can be send to the encoder.
+/// The `VideoEncoderSource` enum represents all the types that can be sent to the encoder.
 pub enum VideoEncoderSource {
     DirectX(SendDirectX<IDirect3DSurface>),
     Buffer((SendDirectX<*const u8>, usize)),
 }
 
-/// The `AudioEncoderSource` struct represents all the types that can be send to the encoder.
+/// The `AudioEncoderSource` enum represents all the types that can be sent to the encoder.
 pub enum AudioEncoderSource {
     Buffer((SendDirectX<*const u8>, usize)),
 }
 
-/// The `VideoSettings` struct represents the settings for the video encoder.
+/// The `VideoSettingsBuilder` struct is used to configure settings for the video encoder.
 pub struct VideoSettingsBuilder {
     sub_type: VideoSettingsSubType,
     bitrate: u32,
@@ -243,18 +223,14 @@ impl VideoSettingsBuilder {
         properties.SetHeight(self.height)?;
         properties.FrameRate()?.SetNumerator(self.frame_rate)?;
         properties.FrameRate()?.SetDenominator(1)?;
-        properties
-            .PixelAspectRatio()?
-            .SetNumerator(self.pixel_aspect_ratio.0)?;
-        properties
-            .PixelAspectRatio()?
-            .SetDenominator(self.pixel_aspect_ratio.1)?;
+        properties.PixelAspectRatio()?.SetNumerator(self.pixel_aspect_ratio.0)?;
+        properties.PixelAspectRatio()?.SetDenominator(self.pixel_aspect_ratio.1)?;
 
         Ok((properties, self.disabled))
     }
 }
 
-/// The `AudioSettingsSubType` enum represents the settings for the audio encoder.
+/// The `AudioSettingsBuilder` is used to configure settings for the audio encoder.
 pub struct AudioSettingsBuilder {
     bitrate: u32,
     channel_count: u32,
@@ -323,16 +299,14 @@ impl Default for AudioSettingsBuilder {
     }
 }
 
-/// The `ContainerSettingsSubType` enum represents the settings for the container encoder.
+/// The `ContainerSettingsBuilder` is used to configure settings for the container.
 pub struct ContainerSettingsBuilder {
     sub_type: ContainerSettingsSubType,
 }
 
 impl ContainerSettingsBuilder {
     pub const fn new() -> Self {
-        Self {
-            sub_type: ContainerSettingsSubType::MPEG4,
-        }
+        Self { sub_type: ContainerSettingsSubType::MPEG4 }
     }
 
     pub const fn sub_type(mut self, sub_type: ContainerSettingsSubType) -> Self {
@@ -467,7 +441,7 @@ impl AudioSettingsSubType {
     }
 }
 
-/// The `Subtype` enum represents the subtypes for the video encoder.
+/// The `ContainerSettingsSubType` enum represents the subtypes for the container.
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub enum ContainerSettingsSubType {
     ASF,
@@ -501,9 +475,9 @@ impl ContainerSettingsSubType {
     }
 }
 
-/// The `VideoEncoder` struct represents a video encoder that can be used to encode video frames and save them to a specified file path.
+/// The `VideoEncoder` struct is used to encode video frames and save them to a specified file path.
 pub struct VideoEncoder {
-    first_timespan: Option<TimeSpan>,
+    first_timestamp: Option<TimeSpan>,
     frame_sender: mpsc::Sender<Option<(VideoEncoderSource, TimeSpan)>>,
     audio_sender: mpsc::Sender<Option<(AudioEncoderSource, TimeSpan)>>,
     sample_requested: i64,
@@ -575,11 +549,9 @@ impl VideoEncoder {
         >::new(move |_, stream_start| {
             let stream_start = stream_start
                 .as_ref()
-                .expect("MediaStreamSource Starting parameter was None This Should Not Happen.");
+                .expect("MediaStreamSource Starting parameter was None. This should not happen.");
 
-            stream_start
-                .Request()?
-                .SetActualStartPosition(TimeSpan { Duration: 0 })?;
+            stream_start.Request()?.SetActualStartPosition(TimeSpan { Duration: 0 })?;
             Ok(())
         }))?;
 
@@ -604,7 +576,7 @@ impl VideoEncoder {
 
             move |_, sample_requested| {
                 let sample_requested = sample_requested.as_ref().expect(
-                    "MediaStreamSource SampleRequested parameter was None This Should Not Happen.",
+                    "MediaStreamSource SampleRequested parameter was None. This should not happen.",
                 );
 
                 if sample_requested
@@ -621,18 +593,18 @@ impl VideoEncoder {
 
                     let audio = match audio_receiver.recv() {
                         Ok(audio) => audio,
-                        Err(e) => panic!("Failed to receive audio from audio sender: {e}"),
+                        Err(e) => panic!("Failed to receive audio from the audio sender: {e}"),
                     };
 
                     match audio {
-                        Some((source, timespan)) => {
+                        Some((source, timestamp)) => {
                             let sample = match source {
                                 AudioEncoderSource::Buffer(buffer_data) => {
                                     let buffer = buffer_data.0;
                                     let buffer =
                                         unsafe { slice::from_raw_parts(buffer.0, buffer_data.1) };
                                     let buffer = CryptographicBuffer::CreateFromByteArray(buffer)?;
-                                    MediaStreamSample::CreateFromBuffer(&buffer, timespan)?
+                                    MediaStreamSample::CreateFromBuffer(&buffer, timestamp)?
                                 }
                             };
 
@@ -655,15 +627,15 @@ impl VideoEncoder {
 
                     let frame = match frame_receiver.recv() {
                         Ok(frame) => frame,
-                        Err(e) => panic!("Failed to receive frame from frame sender: {e}"),
+                        Err(e) => panic!("Failed to receive a frame from the frame sender: {e}"),
                     };
 
                     match frame {
-                        Some((source, timespan)) => {
+                        Some((source, timestamp)) => {
                             let sample = match source {
                                 VideoEncoderSource::DirectX(surface) => {
                                     MediaStreamSample::CreateFromDirect3D11Surface(
-                                        &surface.0, timespan,
+                                        &surface.0, timestamp,
                                     )?
                                 }
                                 VideoEncoderSource::Buffer(buffer_data) => {
@@ -671,7 +643,7 @@ impl VideoEncoder {
                                     let buffer =
                                         unsafe { slice::from_raw_parts(buffer.0, buffer_data.1) };
                                     let buffer = CryptographicBuffer::CreateFromByteArray(buffer)?;
-                                    MediaStreamSample::CreateFromBuffer(&buffer, timespan)?
+                                    MediaStreamSample::CreateFromBuffer(&buffer, timestamp)?
                                 }
                             };
 
@@ -731,7 +703,7 @@ impl VideoEncoder {
         });
 
         Ok(Self {
-            first_timespan: None,
+            first_timestamp: None,
             frame_sender,
             audio_sender,
             sample_requested,
@@ -802,11 +774,9 @@ impl VideoEncoder {
         >::new(move |_, stream_start| {
             let stream_start = stream_start
                 .as_ref()
-                .expect("MediaStreamSource Starting parameter was None This Should Not Happen.");
+                .expect("MediaStreamSource Starting parameter was None. This should not happen.");
 
-            stream_start
-                .Request()?
-                .SetActualStartPosition(TimeSpan { Duration: 0 })?;
+            stream_start.Request()?.SetActualStartPosition(TimeSpan { Duration: 0 })?;
             Ok(())
         }))?;
 
@@ -831,7 +801,7 @@ impl VideoEncoder {
 
             move |_, sample_requested| {
                 let sample_requested = sample_requested.as_ref().expect(
-                    "MediaStreamSource SampleRequested parameter was None This Should Not Happen.",
+                    "MediaStreamSource SampleRequested parameter was None. This should not happen.",
                 );
 
                 if sample_requested
@@ -848,18 +818,18 @@ impl VideoEncoder {
 
                     let audio = match audio_receiver.recv() {
                         Ok(audio) => audio,
-                        Err(e) => panic!("Failed to receive audio from audio sender: {e}"),
+                        Err(e) => panic!("Failed to receive audio from the audio sender: {e}"),
                     };
 
                     match audio {
-                        Some((source, timespan)) => {
+                        Some((source, timestamp)) => {
                             let sample = match source {
                                 AudioEncoderSource::Buffer(buffer_data) => {
                                     let buffer = buffer_data.0;
                                     let buffer =
                                         unsafe { slice::from_raw_parts(buffer.0, buffer_data.1) };
                                     let buffer = CryptographicBuffer::CreateFromByteArray(buffer)?;
-                                    MediaStreamSample::CreateFromBuffer(&buffer, timespan)?
+                                    MediaStreamSample::CreateFromBuffer(&buffer, timestamp)?
                                 }
                             };
 
@@ -882,15 +852,15 @@ impl VideoEncoder {
 
                     let frame = match frame_receiver.recv() {
                         Ok(frame) => frame,
-                        Err(e) => panic!("Failed to receive frame from frame sender: {e}"),
+                        Err(e) => panic!("Failed to receive a frame from the frame sender: {e}"),
                     };
 
                     match frame {
-                        Some((source, timespan)) => {
+                        Some((source, timestamp)) => {
                             let sample = match source {
                                 VideoEncoderSource::DirectX(surface) => {
                                     MediaStreamSample::CreateFromDirect3D11Surface(
-                                        &surface.0, timespan,
+                                        &surface.0, timestamp,
                                     )?
                                 }
                                 VideoEncoderSource::Buffer(buffer_data) => {
@@ -898,7 +868,7 @@ impl VideoEncoder {
                                     let buffer =
                                         unsafe { slice::from_raw_parts(buffer.0, buffer_data.1) };
                                     let buffer = CryptographicBuffer::CreateFromByteArray(buffer)?;
-                                    MediaStreamSample::CreateFromBuffer(&buffer, timespan)?
+                                    MediaStreamSample::CreateFromBuffer(&buffer, timestamp)?
                                 }
                             };
 
@@ -949,7 +919,7 @@ impl VideoEncoder {
         });
 
         Ok(Self {
-            first_timespan: None,
+            first_timestamp: None,
             frame_sender,
             audio_sender,
             sample_requested,
@@ -980,13 +950,13 @@ impl VideoEncoder {
             return Err(VideoEncoderError::VideoDisabled);
         }
 
-        let timespan = match self.first_timespan {
-            Some(timespan) => TimeSpan {
-                Duration: frame.timespan().Duration - timespan.Duration,
-            },
+        let timestamp = match self.first_timestamp {
+            Some(timestamp) => {
+                TimeSpan { Duration: frame.timestamp().Duration - timestamp.Duration }
+            }
             None => {
-                let timespan = frame.timespan();
-                self.first_timespan = Some(timespan);
+                let timestamp = frame.timestamp();
+                self.first_timestamp = Some(timestamp);
                 TimeSpan { Duration: 0 }
             }
         };
@@ -995,7 +965,7 @@ impl VideoEncoder {
             VideoEncoderSource::DirectX(SendDirectX::new(unsafe {
                 frame.as_raw_surface().clone()
             })),
-            timespan,
+            timestamp,
         )))?;
 
         let (lock, cvar) = &*self.frame_notify;
@@ -1008,9 +978,7 @@ impl VideoEncoder {
 
         if self.error_notify.load(atomic::Ordering::Relaxed) {
             if let Some(transcode_thread) = self.transcode_thread.take() {
-                transcode_thread
-                    .join()
-                    .expect("Failed to join transcode thread")?;
+                transcode_thread.join().expect("Failed to join transcode thread")?;
             }
         }
 
@@ -1042,13 +1010,13 @@ impl VideoEncoder {
             return Err(VideoEncoderError::AudioDisabled);
         }
 
-        let timespan = match self.first_timespan {
-            Some(timespan) => TimeSpan {
-                Duration: frame.timespan().Duration - timespan.Duration,
-            },
+        let timestamp = match self.first_timestamp {
+            Some(timestamp) => {
+                TimeSpan { Duration: frame.timestamp().Duration - timestamp.Duration }
+            }
             None => {
-                let timespan = frame.timespan();
-                self.first_timespan = Some(timespan);
+                let timestamp = frame.timestamp();
+                self.first_timestamp = Some(timestamp);
                 TimeSpan { Duration: 0 }
             }
         };
@@ -1057,7 +1025,7 @@ impl VideoEncoder {
             VideoEncoderSource::DirectX(SendDirectX::new(unsafe {
                 frame.as_raw_surface().clone()
             })),
-            timespan,
+            timestamp,
         )))?;
 
         let (lock, cvar) = &*self.frame_notify;
@@ -1070,9 +1038,7 @@ impl VideoEncoder {
 
         if self.error_notify.load(atomic::Ordering::Relaxed) {
             if let Some(transcode_thread) = self.transcode_thread.take() {
-                transcode_thread
-                    .join()
-                    .expect("Failed to join transcode thread")?;
+                transcode_thread.join().expect("Failed to join transcode thread")?;
             }
         }
 
@@ -1081,7 +1047,7 @@ impl VideoEncoder {
                 SendDirectX::new(audio_buffer.as_ptr()),
                 audio_buffer.len(),
             )),
-            timespan,
+            timestamp,
         )))?;
 
         let (lock, cvar) = &*self.audio_notify;
@@ -1094,9 +1060,7 @@ impl VideoEncoder {
 
         if self.error_notify.load(atomic::Ordering::Relaxed) {
             if let Some(transcode_thread) = self.transcode_thread.take() {
-                transcode_thread
-                    .join()
-                    .expect("Failed to join transcode thread")?;
+                transcode_thread.join().expect("Failed to join transcode thread")?;
             }
         }
 
@@ -1107,8 +1071,8 @@ impl VideoEncoder {
     ///
     /// # Arguments
     ///
-    /// * `buffer` - A reference to the frame byte slice to be encoded Windows API expect this to be Bgra and bottom-top.
-    /// * `timespan` - The timespan that correlates to the frame buffer.
+    /// * `buffer` - A reference to the frame byte slice to be encoded. The Windows API expects this to be BGRA and bottom-to-top.
+    /// * `timestamp` - The timestamp that correlates to the frame buffer.
     ///
     /// # Returns
     ///
@@ -1118,27 +1082,25 @@ impl VideoEncoder {
     pub fn send_frame_buffer(
         &mut self,
         buffer: &[u8],
-        timespan: i64,
+        timestamp: i64,
     ) -> Result<(), VideoEncoderError> {
         if self.is_video_disabled {
             return Err(VideoEncoderError::VideoDisabled);
         }
 
-        let frame_timespan = timespan;
-        let timespan = match self.first_timespan {
-            Some(timespan) => TimeSpan {
-                Duration: frame_timespan - timespan.Duration,
-            },
+        let frame_timestamp = timestamp;
+        let timestamp = match self.first_timestamp {
+            Some(timestamp) => TimeSpan { Duration: frame_timestamp - timestamp.Duration },
             None => {
-                let timespan = frame_timespan;
-                self.first_timespan = Some(TimeSpan { Duration: timespan });
+                let timestamp = frame_timestamp;
+                self.first_timestamp = Some(TimeSpan { Duration: timestamp });
                 TimeSpan { Duration: 0 }
             }
         };
 
         self.frame_sender.send(Some((
             VideoEncoderSource::Buffer((SendDirectX::new(buffer.as_ptr()), buffer.len())),
-            timespan,
+            timestamp,
         )))?;
 
         let (lock, cvar) = &*self.frame_notify;
@@ -1151,9 +1113,7 @@ impl VideoEncoder {
 
         if self.error_notify.load(atomic::Ordering::Relaxed) {
             if let Some(transcode_thread) = self.transcode_thread.take() {
-                transcode_thread
-                    .join()
-                    .expect("Failed to join transcode thread")?;
+                transcode_thread.join().expect("Failed to join transcode thread")?;
             }
         }
 
@@ -1165,7 +1125,7 @@ impl VideoEncoder {
     /// # Arguments
     ///
     /// * `buffer` - A reference to the audio byte slice to be encoded.
-    /// * `timespan` - The timespan that correlates to the frame buffer.
+    /// * `timestamp` - The timestamp that correlates to the audio buffer.
     ///
     /// # Returns
     ///
@@ -1175,27 +1135,25 @@ impl VideoEncoder {
     pub fn send_audio_buffer(
         &mut self,
         buffer: &[u8],
-        timespan: i64,
+        timestamp: i64,
     ) -> Result<(), VideoEncoderError> {
         if self.is_audio_disabled {
             return Err(VideoEncoderError::AudioDisabled);
         }
 
-        let audio_timespan = timespan;
-        let timespan = match self.first_timespan {
-            Some(timespan) => TimeSpan {
-                Duration: audio_timespan - timespan.Duration,
-            },
+        let audio_timestamp = timestamp;
+        let timestamp = match self.first_timestamp {
+            Some(timestamp) => TimeSpan { Duration: audio_timestamp - timestamp.Duration },
             None => {
-                let timespan = audio_timespan;
-                self.first_timespan = Some(TimeSpan { Duration: timespan });
+                let timestamp = audio_timestamp;
+                self.first_timestamp = Some(TimeSpan { Duration: timestamp });
                 TimeSpan { Duration: 0 }
             }
         };
 
         self.audio_sender.send(Some((
             AudioEncoderSource::Buffer((SendDirectX::new(buffer.as_ptr()), buffer.len())),
-            timespan,
+            timestamp,
         )))?;
 
         let (lock, cvar) = &*self.audio_notify;
@@ -1208,9 +1166,7 @@ impl VideoEncoder {
 
         if self.error_notify.load(atomic::Ordering::Relaxed) {
             if let Some(transcode_thread) = self.transcode_thread.take() {
-                transcode_thread
-                    .join()
-                    .expect("Failed to join transcode thread")?;
+                transcode_thread.join().expect("Failed to join transcode thread")?;
             }
         }
 
@@ -1229,14 +1185,11 @@ impl VideoEncoder {
         self.audio_sender.send(None)?;
 
         if let Some(transcode_thread) = self.transcode_thread.take() {
-            transcode_thread
-                .join()
-                .expect("Failed to join transcode thread")?;
+            transcode_thread.join().expect("Failed to join transcode thread")?;
         }
 
         self.media_stream_source.RemoveStarting(self.starting)?;
-        self.media_stream_source
-            .RemoveSampleRequested(self.sample_requested)?;
+        self.media_stream_source.RemoveSampleRequested(self.sample_requested)?;
 
         Ok(())
     }

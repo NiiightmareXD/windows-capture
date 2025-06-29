@@ -24,7 +24,7 @@ Add this dependency to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-windows-capture = "1.4.4"
+windows-capture = "1.5.0"
 ```
 
 or run this command
@@ -36,18 +36,19 @@ cargo add windows-capture
 ## Usage
 
 ```rust
-use std::{
-    io::{self, Write},
-    time::Instant,
-};
+use std::io::{self, Write};
+use std::time::Instant;
 
-use windows_capture::{
-    capture::{Context, GraphicsCaptureApiHandler},
-    encoder::{AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder},
-    frame::Frame,
-    graphics_capture_api::InternalCaptureControl,
-    monitor::Monitor,
-    settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings, Settings},
+use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
+use windows_capture::encoder::{
+    AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder,
+};
+use windows_capture::frame::Frame;
+use windows_capture::graphics_capture_api::InternalCaptureControl;
+use windows_capture::monitor::Monitor;
+use windows_capture::settings::{
+    ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
+    MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
 };
 
 // Handles capture events.
@@ -76,10 +77,7 @@ impl GraphicsCaptureApiHandler for Capture {
             "video.mp4",
         )?;
 
-        Ok(Self {
-            encoder: Some(encoder),
-            start: Instant::now(),
-        })
+        Ok(Self { encoder: Some(encoder), start: Instant::now() })
     }
 
     // Called every time a new frame is available.
@@ -88,10 +86,7 @@ impl GraphicsCaptureApiHandler for Capture {
         frame: &mut Frame,
         capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
-        print!(
-            "\rRecording for: {} seconds",
-            self.start.elapsed().as_secs()
-        );
+        print!("\rRecording for: {} seconds", self.start.elapsed().as_secs());
         io::stdout().flush()?;
 
         // Send the frame to the video encoder
@@ -135,6 +130,12 @@ fn main() {
         CursorCaptureSettings::Default,
         // Draw border settings
         DrawBorderSettings::Default,
+        // Secondary window settings, if you want to include secondary windows in the capture
+        SecondaryWindowSettings::Default,
+        // Minimum update interval, if you want to change the frame rate limit (default is 60 FPS or 16.67 ms)
+        MinimumUpdateIntervalSettings::Default,
+        // Dirty region settings,
+        DirtyRegionSettings::Default,
         // The desired color format for the captured frame.
         ColorFormat::Rgba8,
         // Additional flags for the capture settings that will be passed to user defined `new` function.
@@ -145,6 +146,7 @@ fn main() {
     // The errors from handler trait will end up here
     Capture::start(settings).expect("Screen capture failed");
 }
+
 ```
 
 ## Documentation

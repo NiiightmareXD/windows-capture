@@ -1,15 +1,16 @@
-use std::{
-    io::{self, Write},
-    time::Instant,
-};
+use std::io::{self, Write};
+use std::time::Instant;
 
-use windows_capture::{
-    capture::{Context, GraphicsCaptureApiHandler},
-    encoder::{AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder},
-    frame::Frame,
-    graphics_capture_api::InternalCaptureControl,
-    monitor::Monitor,
-    settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings, Settings},
+use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
+use windows_capture::encoder::{
+    AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder,
+};
+use windows_capture::frame::Frame;
+use windows_capture::graphics_capture_api::InternalCaptureControl;
+use windows_capture::monitor::Monitor;
+use windows_capture::settings::{
+    ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
+    MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
 };
 
 // Handles capture events.
@@ -38,10 +39,7 @@ impl GraphicsCaptureApiHandler for Capture {
             "video.mp4",
         )?;
 
-        Ok(Self {
-            encoder: Some(encoder),
-            start: Instant::now(),
-        })
+        Ok(Self { encoder: Some(encoder), start: Instant::now() })
     }
 
     // Called every time a new frame is available.
@@ -50,10 +48,7 @@ impl GraphicsCaptureApiHandler for Capture {
         frame: &mut Frame,
         capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
-        print!(
-            "\rRecording for: {} seconds",
-            self.start.elapsed().as_secs()
-        );
+        print!("\rRecording for: {} seconds", self.start.elapsed().as_secs());
         io::stdout().flush()?;
 
         // Send the frame to the video encoder
@@ -71,14 +66,14 @@ impl GraphicsCaptureApiHandler for Capture {
 
             capture_control.stop();
 
-            // Because there wasn't any new lines in previous prints
+            // Because the previous prints did not include a newline.
             println!();
         }
 
         Ok(())
     }
 
-    // Optional handler called when the capture item (usually a window) closes.
+    // Optional handler called when the capture item (usually a window) is closed.
     fn on_closed(&mut self) -> Result<(), Self::Error> {
         println!("Capture session ended");
 
@@ -87,7 +82,7 @@ impl GraphicsCaptureApiHandler for Capture {
 }
 
 fn main() {
-    // Gets the foreground window, refer to the docs for other capture items
+    // Gets the primary monitor, refer to the docs for other capture items.
     let primary_monitor = Monitor::primary().expect("There is no primary monitor");
 
     let settings = Settings::new(
@@ -97,13 +92,19 @@ fn main() {
         CursorCaptureSettings::Default,
         // Draw border settings
         DrawBorderSettings::Default,
+        // Secondary window settings, if you want to include secondary windows in the capture
+        SecondaryWindowSettings::Default,
+        // Minimum update interval, if you want to change the frame rate limit (default is 60 FPS or 16.67 ms)
+        MinimumUpdateIntervalSettings::Default,
+        // Dirty region settings,
+        DirtyRegionSettings::Default,
         // The desired color format for the captured frame.
         ColorFormat::Rgba8,
-        // Additional flags for the capture settings that will be passed to user defined `new` function.
+        // Additional flags for the capture settings that will be passed to the user-defined `new` function.
         "Yea this works".to_string(),
     );
 
     // Starts the capture and takes control of the current thread.
-    // The errors from handler trait will end up here
+    // The errors from the handler trait will end up here.
     Capture::start(settings).expect("Screen capture failed");
 }

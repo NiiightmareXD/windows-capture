@@ -37,7 +37,9 @@ class Frame:
         Converts The self.frame_buffer Pixel Type To Bgr Instead Of Bgra
     """
 
-    def __init__(self, frame_buffer: numpy.ndarray, width: int, height: int, timespan: int) -> None:
+    def __init__(
+        self, frame_buffer: numpy.ndarray, width: int, height: int, timespan: int
+    ) -> None:
         """Constructs All The Necessary Attributes For The Frame Object"""
         self.frame_buffer = frame_buffer
         self.width = width
@@ -63,7 +65,10 @@ class Frame:
         ]
 
         return Frame(
-            cropped_frame_buffer, end_width - start_width, end_height - start_height, self.timespan
+            cropped_frame_buffer,
+            end_width - start_width,
+            end_height - start_height,
+            self.timespan,
         )
 
 
@@ -164,6 +169,9 @@ class WindowsCapture:
         self,
         cursor_capture: Optional[bool] = True,
         draw_border: Optional[bool] = None,
+        secondary_window: Optional[bool] = None,
+        minimum_update_interval: Optional[int] = None,
+        dirty_region: Optional[bool] = None,
         monitor_index: Optional[int] = None,
         window_name: Optional[str] = None,
     ) -> None:
@@ -178,6 +186,12 @@ class WindowsCapture:
                 Whether To Capture The Cursor
             draw_border : bool
                 Whether To draw The border
+            secondary_window : bool
+                Whether To Capture A Secondary Window
+            minimum_update_interval : int
+                Minimum Update Interval In Milliseconds
+            dirty_region : bool
+                Whether To Report And Render Dirty Regions
             monitor_index : int
                 Index Of The Monitor To Capture
             window_name : str
@@ -193,6 +207,9 @@ class WindowsCapture:
             self.on_closed,
             cursor_capture,
             draw_border,
+            secondary_window,
+            minimum_update_interval,
+            dirty_region,
             monitor_index,
             window_name,
         )
