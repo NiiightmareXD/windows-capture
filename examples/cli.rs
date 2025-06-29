@@ -15,7 +15,9 @@ use windows_capture::{
     frame::Frame,
     graphics_capture_api::InternalCaptureControl,
     monitor::Monitor,
-    settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings, Settings},
+    settings::{
+        ColorFormat, CursorCaptureSettings, DrawBorderSettings, SecondaryWindowSettings, Settings,
+    },
     window::Window,
 };
 
@@ -49,10 +51,12 @@ impl GraphicsCaptureApiHandler for Capture {
     // The type of flags used to get the values from the settings.
     type Flags = CaptureSettings;
 
-    // The type of error that can occur during capture, the error will be returned from `CaptureControl` and `start` functions.
+    // The type of error that can occur during capture, the error will be returned
+    // from `CaptureControl` and `start` functions.
     type Error = Box<dyn std::error::Error + Send + Sync>;
 
-    // Function that will be called to create the struct. The flags can be passed from settings.
+    // Function that will be called to create the struct. The flags can be passed
+    // from settings.
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
         println!("Capture started.");
 
@@ -147,6 +151,10 @@ struct Cli {
     #[arg(long, default_value = "default")]
     draw_border: String,
 
+    /// Draw border settings: always, never, default
+    #[arg(long, default_value = "default")]
+    secondary_windows: String,
+
     /// Output file path
     #[arg(long, default_value = "video.mp4")]
     path: String,
@@ -184,10 +192,23 @@ fn parse_draw_border(s: &str) -> DrawBorderSettings {
     }
 }
 
+fn parse_secondary_windows(s: &str) -> SecondaryWindowSettings {
+    match s.to_lowercase().as_str() {
+        "always" => SecondaryWindowSettings::Include,
+        "never" => SecondaryWindowSettings::Exclude,
+        "default" => SecondaryWindowSettings::Default,
+        _ => {
+            eprintln!("Invalid secondary_windows value: {}", s);
+            std::process::exit(1);
+        }
+    }
+}
+
 fn start_capture<T>(
     capture_item: T,
     cursor_capture: CursorCaptureSettings,
     draw_border: DrawBorderSettings,
+    secondary_windows: SecondaryWindowSettings,
     settings: CaptureSettings,
 ) where
     T: TryInto<GraphicsCaptureItem> + Send + 'static,
@@ -196,6 +217,7 @@ fn start_capture<T>(
         capture_item,
         cursor_capture,
         draw_border,
+        secondary_windows,
         ColorFormat::Rgba8,
         settings,
     );
@@ -210,6 +232,7 @@ fn main() {
 
     let cursor_capture = parse_cursor_capture(&cli.cursor_capture);
     let draw_border = parse_draw_border(&cli.draw_border);
+    let secondary_windows = parse_secondary_windows(&cli.secondary_windows);
 
     let stop_flag = Arc::new(AtomicBool::new(false));
 
@@ -246,7 +269,13 @@ fn main() {
         );
         println!("Window size: {}x{}", width, height);
 
-        start_capture(capture_item, cursor_capture, draw_border, capture_settings);
+        start_capture(
+            capture_item,
+            cursor_capture,
+            draw_border,
+            secondary_windows,
+            capture_settings,
+        );
     } else if let Some(index) = cli.monitor_index {
         // May use Monitor::primary() instead
         let capture_item =
@@ -268,7 +297,13 @@ fn main() {
         println!("Monitor index: {}", index);
         println!("Monitor size: {}x{}", width, height);
 
-        start_capture(capture_item, cursor_capture, draw_border, capture_settings);
+        start_capture(
+            capture_item,
+            cursor_capture,
+            draw_border,
+            secondary_windows,
+            capture_settings,
+        );
     } else {
         eprintln!("Either --window-name or --monitor-index must be provided");
         std::process::exit(1);

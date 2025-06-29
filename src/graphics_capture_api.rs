@@ -25,7 +25,7 @@ use crate::{
     capture::GraphicsCaptureApiHandler,
     d3d11::{self, SendDirectX, create_direct3d_device},
     frame::Frame,
-    settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings},
+    settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings, SecondaryWindowSettings},
     window::Window,
 };
 
@@ -37,6 +37,8 @@ pub enum Error {
     CursorConfigUnsupported,
     #[error("Graphics capture API toggling border capture is not supported")]
     BorderConfigUnsupported,
+    #[error("Graphics capture API including secondary windows is not supported")]
+    SecondaryWindowsUnsupported,
     #[error("Already started")]
     AlreadyStarted,
     #[error("DirectX error: {0}")]
@@ -55,7 +57,8 @@ impl InternalCaptureControl {
     ///
     /// # Arguments
     ///
-    /// * `stop` - An `Arc<AtomicBool>` indicating whether the capture should stop.
+    /// * `stop` - An `Arc<AtomicBool>` indicating whether the capture should
+    ///   stop.
     ///
     /// # Returns
     ///
@@ -83,9 +86,11 @@ pub struct GraphicsCaptureApi {
     _direct3d_device: IDirect3DDevice,
     /// The ID3D11DeviceContext associated with the GraphicsCaptureApi.
     _d3d_device_context: ID3D11DeviceContext,
-    /// The optional Arc<Direct3D11CaptureFramePool> associated with the GraphicsCaptureApi.
+    /// The optional Arc<Direct3D11CaptureFramePool> associated with the
+    /// GraphicsCaptureApi.
     frame_pool: Option<Arc<Direct3D11CaptureFramePool>>,
-    /// The optional GraphicsCaptureSession associated with the GraphicsCaptureApi.
+    /// The optional GraphicsCaptureSession associated with the
+    /// GraphicsCaptureApi.
     session: Option<GraphicsCaptureSession>,
     /// The Arc<AtomicBool> used to halt the GraphicsCaptureApi.
     halt: Arc<AtomicBool>,
@@ -107,14 +112,18 @@ impl GraphicsCaptureApi {
     /// * `item` - The graphics capture item to capture.
     /// * `callback` - The callback handler for capturing frames.
     /// * `capture_cursor` - Optional flag to capture the cursor.
-    /// * `draw_border` - Optional flag to draw a border around the captured region.
+    /// * `draw_border` - Optional flag to draw a border around the captured
+    ///   region.
+    /// * `secondary_windows` - Optional flag to include secondary windows in
+    ///   the capture.
     /// * `color_format` - The color format for the captured frames.
     /// * `thread_id` - The ID of the thread where the capture is running.
     /// * `result` - The result of the capture operation.
     ///
     /// # Returns
     ///
-    /// Returns a `Result` containing the new `GraphicsCaptureApi` struct if successful, or an `Error` if an error occurred.
+    /// Returns a `Result` containing the new `GraphicsCaptureApi` struct if
+    /// successful, or an `Error` if an error occurred.
     #[allow(clippy::too_many_arguments)]
     #[inline]
     pub fn new<
@@ -127,6 +136,7 @@ impl GraphicsCaptureApi {
         callback: Arc<Mutex<T>>,
         cursor_capture: CursorCaptureSettings,
         draw_border: DrawBorderSettings,
+        secondary_windows: SecondaryWindowSettings,
         color_format: ColorFormat,
         window: Option<Window>,
         thread_id: u32,
@@ -338,6 +348,20 @@ impl GraphicsCaptureApi {
             }
         }
 
+        if secondary_windows != SecondaryWindowSettings::Default {
+            if Self::is_secondary_windows_supported()? {
+                match secondary_windows {
+                    SecondaryWindowSettings::Default => (),
+                    SecondaryWindowSettings::Include => session.SetIncludeSecondaryWindows(true)?,
+                    SecondaryWindowSettings::Exclude => {
+                        session.SetIncludeSecondaryWindows(false)?
+                    }
+                }
+            } else {
+                return Err(Error::SecondaryWindowsUnsupported);
+            }
+        }
+
         Ok(Self {
             item,
             _d3d_device: d3d_device,
@@ -356,7 +380,8 @@ impl GraphicsCaptureApi {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the capture started successfully, or an `Error` if an error occurred.
+    /// Returns `Ok(())` if the capture started successfully, or an `Error` if
+    /// an error occurred.
     #[inline]
     pub fn start_capture(&mut self) -> Result<(), Error> {
         if self.active {
@@ -404,7 +429,8 @@ impl GraphicsCaptureApi {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(true)` if the API is supported, `Ok(false)` if the API is not supported, or an `Error` if an error occurred.
+    /// Returns `Ok(true)` if the API is supported, `Ok(false)` if the API is
+    /// not supported, or an `Error` if an error occurred.
     #[inline]
     pub fn is_supported() -> Result<bool, Error> {
         Ok(ApiInformation::IsApiContractPresentByMajor(
@@ -417,7 +443,8 @@ impl GraphicsCaptureApi {
     ///
     /// # Returns
     ///
-    /// Returns `true` if toggling the cursor capture is supported, `false` otherwise.
+    /// Returns `true` if toggling the cursor capture is supported, `false`
+    /// otherwise.
     #[inline]
     pub fn is_cursor_settings_supported() -> Result<bool, Error> {
         Ok(ApiInformation::IsPropertyPresent(
@@ -430,12 +457,27 @@ impl GraphicsCaptureApi {
     ///
     /// # Returns
     ///
-    /// Returns `true` if toggling the border capture is supported, `false` otherwise.
+    /// Returns `true` if toggling the border capture is supported, `false`
+    /// otherwise.
     #[inline]
     pub fn is_border_settings_supported() -> Result<bool, Error> {
         Ok(ApiInformation::IsPropertyPresent(
             &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
             &HSTRING::from("IsBorderRequired"),
+        )? && Self::is_supported()?)
+    }
+
+    /// Check if you can include secondary windows in the capture session.
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if including secondary windows is supported, `false`
+    /// otherwise.
+    #[inline]
+    pub fn is_secondary_windows_supported() -> Result<bool, Error> {
+        Ok(ApiInformation::IsPropertyPresent(
+            &HSTRING::from("Windows.Graphics.Capture.GraphicsCaptureSession"),
+            &HSTRING::from("IncludeSecondaryWindows"),
         )? && Self::is_supported()?)
     }
 }
