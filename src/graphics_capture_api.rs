@@ -148,6 +148,7 @@ impl GraphicsCaptureApi {
         minimum_update_interval_settings: MinimumUpdateIntervalSettings,
         dirty_region_settings: DirtyRegionSettings,
         color_format: ColorFormat,
+        window: Option<Window>,
         thread_id: u32,
         result: Arc<Mutex<Option<E>>>,
     ) -> Result<Self, Error> {
@@ -317,6 +318,7 @@ impl GraphicsCaptureApi {
                     texture_height,
                     color_format,
                     title_bar_height,
+                    title_bar_height,
                 );
 
                 // Init internal capture control
@@ -439,7 +441,8 @@ impl GraphicsCaptureApi {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the capture started successfully, or an `Error` if an error occurred.
+    /// Returns `Ok(())` if the capture started successfully, or an `Error` if
+    /// an error occurred.
     #[inline]
     pub fn start_capture(&mut self) -> Result<(), Error> {
         if self.active {

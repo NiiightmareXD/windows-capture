@@ -53,7 +53,8 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
     ///
     /// * `thread_handle` - The join handle for the capture thread.
     /// * `halt_handle` - The atomic boolean used to pause the capture thread.
-    /// * `callback` - The mutex-protected callback struct used to call struct methods directly.
+    /// * `callback` - The mutex-protected callback struct used to call struct
+    ///   methods directly.
     ///
     /// # Returns
     ///
@@ -146,9 +147,11 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
             let handle = thread_handle.as_raw_handle();
             let handle = HANDLE(handle);
             let thread_id = unsafe { GetThreadId(handle) };
+            let thread_id = unsafe { GetThreadId(handle) };
 
             loop {
                 match unsafe {
+                    PostThreadMessageW(thread_id, WM_QUIT, WPARAM::default(), LPARAM::default())
                     PostThreadMessageW(thread_id, WM_QUIT, WPARAM::default(), LPARAM::default())
                 } {
                     Ok(()) => break,
@@ -530,7 +533,8 @@ pub trait GraphicsCaptureApiHandler: Sized {
         Ok(CaptureControl::new(thread_handle, halt_handle, callback))
     }
 
-    /// Function that will be called to create the struct. The flags can be passed from settings.
+    /// Function that will be called to create the struct. The flags can be
+    /// passed from settings.
     ///
     /// # Arguments
     ///
