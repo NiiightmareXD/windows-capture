@@ -63,10 +63,12 @@ impl GraphicsCaptureApiHandler for Capture {
     // The type of flags used to get the values from the settings.
     type Flags = String;
 
-    // The type of error that can be returned from `CaptureControl` and `start` functions.
+    // The type of error that can be returned from `CaptureControl` and `start`
+    // functions.
     type Error = Box<dyn std::error::Error + Send + Sync>;
 
-    // Function that will be called to create a new instance. The flags can be passed from settings.
+    // Function that will be called to create a new instance. The flags can be
+    // passed from settings.
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
         println!("Created with Flags: {}", ctx.flags);
 
@@ -92,10 +94,10 @@ impl GraphicsCaptureApiHandler for Capture {
         // Send the frame to the video encoder
         self.encoder.as_mut().unwrap().send_frame(frame)?;
 
-        // Note: The frame has other uses too, for example, you can save a single frame to a file, like this:
-        // frame.save_as_image("frame.png", ImageFormat::Png)?;
-        // Or get the raw data like this so you have full control:
-        // let data = frame.buffer()?;
+        // Note: The frame has other uses too, for example, you can save a single frame
+        // to a file, like this: frame.save_as_image("frame.png", ImageFormat::Png)?;
+        // Or get the raw data like this so you have full
+        // control: let data = frame.buffer()?;
 
         // Stop the capture after 6 seconds
         if self.start.elapsed().as_secs() >= 6 {
@@ -104,14 +106,14 @@ impl GraphicsCaptureApiHandler for Capture {
 
             capture_control.stop();
 
-            // Because there wasn't any new lines in previous prints
+            // Because the previous prints did not include a newline.
             println!();
         }
 
         Ok(())
     }
 
-    // Optional handler called when the capture item (usually a window) closes.
+    // Optional handler called when the capture item (usually a window) is closed.
     fn on_closed(&mut self) -> Result<(), Self::Error> {
         println!("Capture session ended");
 
@@ -120,7 +122,7 @@ impl GraphicsCaptureApiHandler for Capture {
 }
 
 fn main() {
-    // Gets the foreground window, refer to the docs for other capture items
+    // Gets the primary monitor, refer to the docs for other capture items.
     let primary_monitor = Monitor::primary().expect("There is no primary monitor");
 
     let settings = Settings::new(
@@ -138,15 +140,14 @@ fn main() {
         DirtyRegionSettings::Default,
         // The desired color format for the captured frame.
         ColorFormat::Rgba8,
-        // Additional flags for the capture settings that will be passed to user defined `new` function.
+        // Additional flags for the capture settings that will be passed to the user-defined `new` function.
         "Yea this works".to_string(),
     );
 
     // Starts the capture and takes control of the current thread.
-    // The errors from handler trait will end up here
+    // The errors from the handler trait will end up here.
     Capture::start(settings).expect("Screen capture failed");
 }
-
 ```
 
 ## Documentation

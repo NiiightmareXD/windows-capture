@@ -568,19 +568,14 @@ impl GraphicsCaptureApi {
 impl Drop for GraphicsCaptureApi {
     fn drop(&mut self) {
         if let Some(frame_pool) = self.frame_pool.take() {
-            frame_pool
-                .RemoveFrameArrived(self.frame_arrived_event_token)
-                .expect("Failed to remove Frame Arrived event handler");
-
-            frame_pool.Close().expect("Failed to Close Frame Pool");
+            let _ = frame_pool.RemoveFrameArrived(self.frame_arrived_event_token);
+            let _ = frame_pool.Close();
         }
 
         if let Some(session) = self.session.take() {
-            session.Close().expect("Failed to Close Capture Session");
+            let _ = session.Close();
         }
 
-        self.item
-            .RemoveClosed(self.capture_closed_event_token)
-            .expect("Failed to remove Capture Session Closed event handler");
+        let _ = self.item.RemoveClosed(self.capture_closed_event_token);
     }
 }

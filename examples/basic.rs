@@ -1,5 +1,7 @@
 use std::io::{self, Write};
-use std::time::Instant;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::encoder::{
@@ -13,97 +15,151 @@ use windows_capture::settings::{
     MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
 };
 
-// Handles capture events.
+/// Handles the capture events.
 struct Capture {
-    // The video encoder that will be used to encode the frames.
+    /// The video encoder used to encode the frames.
     encoder: Option<VideoEncoder>,
-    // To measure the time the capture has been running
+    /// The timestamp of when the capture started, used to calculate the recording duration.
     start: Instant,
+    /// A flag to signal the capture thread to stop.
+    stop_flag: Arc<AtomicBool>,
+    /// The number of frames captured since the last FPS calculation.
+    frame_count_since_reset: u64,
+    /// The timestamp of the last FPS calculation, used to measure the interval.
+    last_reset: Instant,
 }
 
 impl GraphicsCaptureApiHandler for Capture {
-    // The type of flags used to get the values from the settings.
-    type Flags = String;
+    /// The type of flags used to pass settings to the `new` function.
+    type Flags = (Arc<AtomicBool>, String);
 
-    // The type of error that can be returned from `CaptureControl` and `start`
-    // functions.
+    /// The error type that can be returned from the capture handlers.
     type Error = Box<dyn std::error::Error + Send + Sync>;
 
-    // Function that will be called to create a new instance. The flags can be
-    // passed from settings.
+    /// Called by the library to create a new instance of the handler.
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
-        println!("Created with Flags: {}", ctx.flags);
+        println!("Capture started. Press Ctrl+C to stop.");
 
+        let (stop_flag, path) = ctx.flags;
+
+        let monitor = Monitor::primary()?;
+        let width = monitor.width()?;
+        let height = monitor.height()?;
+
+        let video_settings = VideoSettingsBuilder::new(width, height);
         let encoder = VideoEncoder::new(
-            VideoSettingsBuilder::new(1920, 1080),
+            video_settings,
+            // Disable audio for this example.
             AudioSettingsBuilder::default().disabled(true),
             ContainerSettingsBuilder::default(),
-            "video.mp4",
+            &path,
         )?;
 
-        Ok(Self { encoder: Some(encoder), start: Instant::now() })
+        Ok(Self {
+            encoder: Some(encoder),
+            start: Instant::now(),
+            stop_flag,
+            frame_count_since_reset: 0,
+            last_reset: Instant::now(),
+        })
     }
 
-    // Called every time a new frame is available.
+    /// Called for each new frame that is captured.
     fn on_frame_arrived(
         &mut self,
         frame: &mut Frame,
         capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
-        print!("\rRecording for: {} seconds", self.start.elapsed().as_secs());
+        self.frame_count_since_reset += 1;
+
+        // Calculate the time elapsed since the last FPS reset.
+        let elapsed_since_reset = self.last_reset.elapsed();
+        // Calculate and display the current FPS.
+        let fps = self.frame_count_since_reset as f64 / elapsed_since_reset.as_secs_f64();
+
+        // Print the recording duration and current FPS.
+        print!("Recording for: {:.2}s | FPS: {:.2}", self.start.elapsed().as_secs_f64(), fps);
         io::stdout().flush()?;
 
-        // Send the frame to the video encoder
+        // Send the frame to the video encoder.
         self.encoder.as_mut().unwrap().send_frame(frame)?;
 
-        // Note: The frame has other uses too, for example, you can save a single frame
-        // to a file, like this: frame.save_as_image("frame.png",
-        // ImageFormat::Png)?; Or get the raw data like this so you have full
-        // control: let data = frame.buffer()?;
+        // Check if the stop flag has been set (e.g., by Ctrl+C).
+        if self.stop_flag.load(Ordering::SeqCst) {
+            println!(
+                "
+Stopping capture..."
+            );
 
-        // Stop the capture after 6 seconds
-        if self.start.elapsed().as_secs() >= 6 {
-            // Finish the encoder and save the video.
+            // Finalize the encoding and save the video file.
             self.encoder.take().unwrap().finish()?;
 
+            // Signal the capture loop to stop.
             capture_control.stop();
 
-            // Because the previous prints did not include a newline.
-            println!();
+            println!(
+                "
+Recording stopped."
+            );
+        }
+
+        // Reset the FPS counter every second.
+        if elapsed_since_reset >= Duration::from_secs(1) {
+            self.frame_count_since_reset = 0;
+            self.last_reset = Instant::now();
         }
 
         Ok(())
     }
 
-    // Optional handler called when the capture item (usually a window) is closed.
+    /// Optional handler for when the capture item (e.g., a window) is closed.
     fn on_closed(&mut self) -> Result<(), Self::Error> {
-        println!("Capture session ended");
+        println!(
+            "
+Capture item closed, stopping capture."
+        );
+
+        // Stop the capture gracefully.
+        self.stop_flag.store(true, Ordering::SeqCst);
 
         Ok(())
     }
 }
 
 fn main() {
-    // Gets the primary monitor, refer to the docs for other capture items.
+    // Gets the primary monitor.
     let primary_monitor = Monitor::primary().expect("There is no primary monitor");
+    let monitor_name = primary_monitor.name().expect("Failed to get monitor name");
+
+    // Create an atomic boolean flag to signal the capture to stop.
+    let stop_flag = Arc::new(AtomicBool::new(false));
+
+    // Set up a Ctrl+C handler to gracefully stop the capture.
+    {
+        let stop_flag = stop_flag.clone();
+        ctrlc::set_handler(move || {
+            stop_flag.store(true, Ordering::SeqCst);
+        })
+        .expect("Failed to set Ctrl-C handler");
+    }
 
     let settings = Settings::new(
-        // Item to capture
+        // The item to capture.
         primary_monitor,
-        // Capture cursor settings
+        // The cursor capture settings.
         CursorCaptureSettings::Default,
-        // Draw border settings
+        // The draw border settings.
         DrawBorderSettings::Default,
-        // Secondary window settings, if you want to include secondary windows in the capture
+        // The secondary window settings.
         SecondaryWindowSettings::Default,
-        // Minimum update interval, if you want to change the frame rate limit (default is 60 FPS or 16.67 ms)
+        // The minimum update interval.
         MinimumUpdateIntervalSettings::Default,
-        // Dirty region settings,
+        // The dirty region settings.
         DirtyRegionSettings::Default,
         // The desired color format for the captured frame.
-        ColorFormat::Rgba8,
-        // Additional flags for the capture settings that will be passed to the user-defined `new` function.
-        "Yea this works".to_string(),
+        ColorFormat::Bgra8,
+        // The flags to pass to the `new` function of the handler.
+        (stop_flag, format!("{monitor_name}.mp4")),
     );
 
     // Starts the capture and takes control of the current thread.

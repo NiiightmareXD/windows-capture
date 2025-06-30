@@ -1072,7 +1072,7 @@ impl VideoEncoder {
     /// # Arguments
     ///
     /// * `buffer` - A reference to the frame byte slice to be encoded. The Windows API expects this to be BGRA and bottom-to-top.
-    /// * `timestamp` - The timestamp that correlates to the frame buffer.
+    /// * `timestamp` - The timestamp of the frame, in 100-nanosecond units.
     ///
     /// # Returns
     ///
@@ -1125,7 +1125,7 @@ impl VideoEncoder {
     /// # Arguments
     ///
     /// * `buffer` - A reference to the audio byte slice to be encoded.
-    /// * `timestamp` - The timestamp that correlates to the audio buffer.
+    /// * `timestamp` - The timestamp of the audio buffer, in 100-nanosecond units.
     ///
     /// # Returns
     ///

@@ -70,7 +70,7 @@ impl<'a> Frame<'a> {
     /// * `d3d_device` - The `ID3D11Device` used for creating the frame.
     /// * `frame_surface` - The `IDirect3DSurface` representing the frame's surface.
     /// * `frame_texture` - The `ID3D11Texture2D` representing the frame's texture.
-    /// * `timestamp` - The `TimeSpan` representing the frame's timestamp.
+    /// * `timestamp` - The `TimeSpan` representing the frame's timestamp, in 100-nanosecond units.
     /// * `context` - The `ID3D11DeviceContext` used for copying the texture.
     /// * `buffer` - A mutable reference to the buffer for the frame data.
     /// * `width` - The width of the frame.

@@ -60,10 +60,12 @@
 //!     // The type of flags used to get the values from the settings.
 //!     type Flags = String;
 //!
-//!     // The type of error that can be returned from `CaptureControl` and `start` functions.
+//!     // The type of error that can be returned from `CaptureControl` and `start`
+//!     // functions.
 //!     type Error = Box<dyn std::error::Error + Send + Sync>;
 //!
-//!     // Function that will be called to create a new instance. The flags can be passed from settings.
+//!     // Function that will be called to create a new instance. The flags can be
+//!     // passed from settings.
 //!     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
 //!         println!("Created with Flags: {}", ctx.flags);
 //!
@@ -89,10 +91,10 @@
 //!         // Send the frame to the video encoder
 //!         self.encoder.as_mut().unwrap().send_frame(frame)?;
 //!
-//!         // Note: The frame has other uses too, for example, you can save a single frame to a file, like this:
-//!         // frame.save_as_image("frame.png", ImageFormat::Png)?;
-//!         // Or get the raw data like this so you have full control:
-//!         // let data = frame.buffer()?;
+//!         // Note: The frame has other uses too, for example, you can save a single frame
+//!         // to a file, like this: frame.save_as_image("frame.png", ImageFormat::Png)?;
+//!         // Or get the raw data like this so you have full
+//!         // control: let data = frame.buffer()?;
 //!
 //!         // Stop the capture after 6 seconds
 //!         if self.start.elapsed().as_secs() >= 6 {
