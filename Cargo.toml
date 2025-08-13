@@ -54,7 +54,7 @@ windows-future = "0.2.1"
 parking_lot = "0.12.4"
 
 # Multithreading
-rayon = "1.10.0"
+rayon = "1.11.0"
 
 # Error handling
 thiserror = "2.0.12"
