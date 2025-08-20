@@ -938,14 +938,14 @@ impl VideoEncoder {
     ///
     /// # Arguments
     ///
-    /// * `frame` - A mutable reference to the `Frame` to be encoded.
+    /// * `frame` - A reference to the `Frame` to be encoded.
     ///
     /// # Returns
     ///
     /// Returns `Ok(())` if the frame is successfully sent for encoding, or a `VideoEncoderError`
     /// if an error occurs.
     #[inline]
-    pub fn send_frame(&mut self, frame: &mut Frame) -> Result<(), VideoEncoderError> {
+    pub fn send_frame(&mut self, frame: &Frame) -> Result<(), VideoEncoderError> {
         if self.is_video_disabled {
             return Err(VideoEncoderError::VideoDisabled);
         }
