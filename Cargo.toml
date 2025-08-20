@@ -57,7 +57,7 @@ parking_lot = "0.12.4"
 rayon = "1.10.0"
 
 # Error handling
-thiserror = "2.0.12"
+thiserror = "2.0.16"
 
 [dev-dependencies]
 clap = { version = "4.5.40", features = ["derive"] }
