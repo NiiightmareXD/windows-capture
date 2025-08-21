@@ -167,3 +167,6 @@ pub mod monitor;
 pub mod settings;
 /// Contains the functionality for working with windows and capturing specific windows.
 pub mod window;
+
+/// Contains network transmission utilities for streaming encoded frames.
+pub mod network;

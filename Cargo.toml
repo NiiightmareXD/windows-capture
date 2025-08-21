@@ -59,6 +59,9 @@ rayon = "1.10.0"
 # Error handling
 thiserror = "2.0.12"
 
+# Network serialization
+byteorder = "1.5"
+
 [dev-dependencies]
 clap = { version = "4.5.40", features = ["derive"] }
 ctrlc = "3.4.7"
@@ -73,6 +76,10 @@ doc-scrape-examples = false
 
 [[example]]
 name = "cli"
+doc-scrape-examples = false
+
+[[example]]
+name = "streaming"
 doc-scrape-examples = false
 
 [workspace]
