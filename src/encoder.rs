@@ -30,6 +30,62 @@ use crate::d3d11::SendDirectX;
 use crate::frame::{Frame, ImageFormat};
 use crate::settings::ColorFormat;
 
+/// Represents an encoded video frame with metadata
+#[derive(Debug, Clone)]
+pub struct EncodedFrame {
+    /// The encoded frame data
+    pub data: Vec<u8>,
+    /// The timestamp of the frame in 100-nanosecond units
+    pub timestamp: i64,
+    /// The frame type (keyframe, delta frame, etc.)
+    pub frame_type: FrameType,
+    /// The width of the original frame
+    pub width: u32,
+    /// The height of the original frame
+    pub height: u32,
+}
+
+/// Represents the type of encoded frame
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameType {
+    /// Key frame (I-frame) - contains complete frame data
+    KeyFrame,
+    /// Delta frame (P-frame) - contains only changes from previous frame
+    DeltaFrame,
+    /// Bidirectional frame (B-frame) - depends on both past and future frames
+    BidirectionalFrame,
+}
+
+/// Represents an encoded audio frame with metadata
+#[derive(Debug, Clone)]
+pub struct EncodedAudioFrame {
+    /// The encoded audio data
+    pub data: Vec<u8>,
+    /// The timestamp of the audio frame in 100-nanosecond units
+    pub timestamp: i64,
+    /// The number of audio samples in this frame
+    pub sample_count: u32,
+}
+
+/// Callback trait for handling encoded frames in real-time
+pub trait FrameCallback: Send + Sync {
+    /// Called when a new encoded video frame is available
+    fn on_video_frame(&mut self, frame: EncodedFrame) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    
+    /// Called when a new encoded audio frame is available
+    fn on_audio_frame(&mut self, frame: EncodedAudioFrame) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    
+    /// Called when the stream starts
+    fn on_stream_start(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+    
+    /// Called when the stream ends
+    fn on_stream_end(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+}
+
 #[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
 pub enum ImageEncoderError {
     #[error("This color format is not supported for saving as an image")]
@@ -1208,3 +1264,485 @@ impl Drop for VideoEncoder {
 
 #[allow(clippy::non_send_fields_in_send_ty)]
 unsafe impl Send for VideoEncoder {}
+
+/// The `StreamingVideoEncoder` struct is used to encode video frames and stream them in real-time
+/// without writing to files. It uses a callback mechanism to deliver encoded frames.
+pub struct StreamingVideoEncoder {
+    first_timestamp: Option<TimeSpan>,
+    frame_sender: mpsc::Sender<Option<(VideoEncoderSource, TimeSpan)>>,
+    audio_sender: mpsc::Sender<Option<(AudioEncoderSource, TimeSpan)>>,
+    sample_requested: i64,
+    media_stream_source: MediaStreamSource,
+    starting: i64,
+    transcode_thread: Option<JoinHandle<Result<(), VideoEncoderError>>>,
+    frame_notify: Arc<(Mutex<bool>, Condvar)>,
+    audio_notify: Arc<(Mutex<bool>, Condvar)>,
+    error_notify: Arc<AtomicBool>,
+    is_video_disabled: bool,
+    is_audio_disabled: bool,
+    callback: Arc<Mutex<Box<dyn FrameCallback>>>,
+    encoded_frame_sender: mpsc::Sender<EncodedFrame>,
+    encoded_audio_sender: mpsc::Sender<EncodedAudioFrame>,
+}
+
+impl StreamingVideoEncoder {
+    /// Creates a new `StreamingVideoEncoder` instance with the specified parameters.
+    ///
+    /// # Arguments
+    ///
+    /// * `video_settings` - The video encoder settings.
+    /// * `audio_settings` - The audio encoder settings.
+    /// * `container_settings` - The container settings.
+    /// * `callback` - The callback for handling encoded frames.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing the `StreamingVideoEncoder` instance if successful, or a
+    /// `VideoEncoderError` if an error occurs.
+    #[inline]
+    pub fn new(
+        video_settings: VideoSettingsBuilder,
+        audio_settings: AudioSettingsBuilder,
+        container_settings: ContainerSettingsBuilder,
+        callback: Box<dyn FrameCallback>,
+    ) -> Result<Self, VideoEncoderError> {
+        let media_encoding_profile = MediaEncodingProfile::new()?;
+
+        let (video_encoding_properties, is_video_disabled) = video_settings.build()?;
+        media_encoding_profile.SetVideo(&video_encoding_properties)?;
+        let (audio_encoding_properties, is_audio_disabled) = audio_settings.build()?;
+        media_encoding_profile.SetAudio(&audio_encoding_properties)?;
+        let container_encoding_properties = container_settings.build()?;
+        media_encoding_profile.SetContainer(&container_encoding_properties)?;
+
+        let video_encoding_properties = VideoEncodingProperties::CreateUncompressed(
+            &MediaEncodingSubtypes::Bgra8()?,
+            video_encoding_properties.Width()?,
+            video_encoding_properties.Height()?,
+        )?;
+        let video_stream_descriptor = VideoStreamDescriptor::Create(&video_encoding_properties)?;
+
+        let audio_encoding_properties = AudioEncodingProperties::CreateAac(
+            audio_encoding_properties.SampleRate()?,
+            audio_encoding_properties.ChannelCount()?,
+            audio_encoding_properties.Bitrate()?,
+        )?;
+        let audio_stream_descriptor = AudioStreamDescriptor::Create(&audio_encoding_properties)?;
+
+        let media_stream_source = MediaStreamSource::CreateFromDescriptors(
+            &video_stream_descriptor,
+            &audio_stream_descriptor,
+        )?;
+        media_stream_source.SetBufferTime(TimeSpan::default())?;
+
+        let starting = media_stream_source.Starting(&TypedEventHandler::<
+            MediaStreamSource,
+            MediaStreamSourceStartingEventArgs,
+        >::new(move |_, stream_start| {
+            let stream_start = stream_start
+                .as_ref()
+                .expect("MediaStreamSource Starting parameter was None. This should not happen.");
+
+            stream_start.Request()?.SetActualStartPosition(TimeSpan { Duration: 0 })?;
+            Ok(())
+        }))?;
+
+        let (frame_sender, frame_receiver) =
+            mpsc::channel::<Option<(VideoEncoderSource, TimeSpan)>>();
+
+        let (audio_sender, audio_receiver) =
+            mpsc::channel::<Option<(AudioEncoderSource, TimeSpan)>>();
+
+        let frame_notify = Arc::new((Mutex::new(false), Condvar::new()));
+        let audio_notify = Arc::new((Mutex::new(false), Condvar::new()));
+
+        let (encoded_frame_sender, encoded_frame_receiver) = mpsc::channel::<EncodedFrame>();
+        let (encoded_audio_sender, encoded_audio_receiver) = mpsc::channel::<EncodedAudioFrame>();
+
+        let callback = Arc::new(Mutex::new(callback));
+
+        let sample_requested = media_stream_source.SampleRequested(&TypedEventHandler::<
+            MediaStreamSource,
+            MediaStreamSourceSampleRequestedEventArgs,
+        >::new({
+            let frame_receiver = frame_receiver;
+            let frame_notify = frame_notify.clone();
+            let audio_receiver = audio_receiver;
+            let audio_notify = audio_notify.clone();
+            let callback = callback.clone();
+            let encoded_frame_sender = encoded_frame_sender.clone();
+            let encoded_audio_sender = encoded_audio_sender.clone();
+
+            move |_, sample_requested| {
+                let sample_requested = sample_requested.as_ref().expect(
+                    "MediaStreamSource SampleRequested parameter was None. This should not happen.",
+                );
+
+                if sample_requested
+                    .Request()?
+                    .StreamDescriptor()?
+                    .cast::<AudioStreamDescriptor>()
+                    .is_ok()
+                {
+                    if is_audio_disabled {
+                        sample_requested.Request()?.SetSample(None)?;
+                        return Ok(());
+                    }
+
+                    let audio = match audio_receiver.recv() {
+                        Ok(audio) => audio,
+                        Err(e) => panic!("Failed to receive audio from the audio sender: {e}"),
+                    };
+
+                    match audio {
+                        Some((source, timestamp)) => {
+                            let sample = match source {
+                                AudioEncoderSource::Buffer(buffer_data) => {
+                                    let buffer = buffer_data.0;
+                                    let buffer =
+                                        unsafe { slice::from_raw_parts(buffer.0, buffer_data.1) };
+                                    let buffer = CryptographicBuffer::CreateFromByteArray(buffer)?;
+                                    MediaStreamSample::CreateFromBuffer(&buffer, timestamp)?
+                                }
+                            };
+
+                            // Extract encoded audio data and send to callback
+                            let audio_data = sample.Buffer()?;
+                            let audio_buffer = CryptographicBuffer::CopyToByteArray(&audio_data)?;
+                            
+                            let encoded_audio = EncodedAudioFrame {
+                                data: audio_buffer.to_vec(),
+                                timestamp: timestamp.Duration,
+                                sample_count: audio_encoding_properties.SampleRate()? / 1000, // Approximate
+                            };
+
+                            // Send to callback
+                            if let Err(e) = encoded_audio_sender.send(encoded_audio) {
+                                eprintln!("Failed to send encoded audio frame: {}", e);
+                            }
+
+                            sample_requested.Request()?.SetSample(&sample)?;
+                        }
+                        None => {
+                            sample_requested.Request()?.SetSample(None)?;
+                        }
+                    }
+
+                    let (lock, cvar) = &*audio_notify;
+                    *lock.lock() = true;
+                    cvar.notify_one();
+                } else {
+                    if is_video_disabled {
+                        sample_requested.Request()?.SetSample(None)?;
+                        return Ok(());
+                    }
+
+                    let frame = match frame_receiver.recv() {
+                        Ok(frame) => frame,
+                        Err(e) => panic!("Failed to receive a frame from the frame sender: {e}"),
+                    };
+
+                    match frame {
+                        Some((source, timestamp)) => {
+                            let sample = match source {
+                                VideoEncoderSource::DirectX(surface) => {
+                                    MediaStreamSample::CreateFromDirect3D11Surface(
+                                        &surface.0, timestamp,
+                                    )?
+                                }
+                                VideoEncoderSource::Buffer(buffer_data) => {
+                                    let buffer = buffer_data.0;
+                                    let buffer =
+                                        unsafe { slice::from_raw_parts(buffer.0, buffer_data.1) };
+                                    let buffer = CryptographicBuffer::CreateFromByteArray(buffer)?;
+                                    MediaStreamSample::CreateFromBuffer(&buffer, timestamp)?
+                                }
+                            };
+
+                            // Extract encoded video data and send to callback
+                            let video_data = sample.Buffer()?;
+                            let video_buffer = CryptographicBuffer::CopyToByteArray(&video_data)?;
+                            
+                            let encoded_frame = EncodedFrame {
+                                data: video_buffer.to_vec(),
+                                timestamp: timestamp.Duration,
+                                frame_type: FrameType::DeltaFrame, // Default, could be determined from sample properties
+                                width: video_encoding_properties.Width()?,
+                                height: video_encoding_properties.Height()?,
+                            };
+
+                            // Send to callback
+                            if let Err(e) = encoded_frame_sender.send(encoded_frame) {
+                                eprintln!("Failed to send encoded video frame: {}", e);
+                            }
+
+                            sample_requested.Request()?.SetSample(&sample)?;
+                        }
+                        None => {
+                            sample_requested.Request()?.SetSample(None)?;
+                        }
+                    }
+
+                    let (lock, cvar) = &*frame_notify;
+                    *lock.lock() = true;
+                    cvar.notify_one();
+                }
+
+                Ok(())
+            }
+        }))?;
+
+        let media_transcoder = MediaTranscoder::new()?;
+        media_transcoder.SetHardwareAccelerationEnabled(true)?;
+
+        // Create an in-memory stream for transcoding
+        let stream = InMemoryRandomAccessStream::new()?;
+
+        let transcode = media_transcoder
+            .PrepareMediaStreamSourceTranscodeAsync(
+                &media_stream_source,
+                &stream,
+                &media_encoding_profile,
+            )?
+            .get()?;
+
+        let error_notify = Arc::new(AtomicBool::new(false));
+        let transcode_thread = thread::spawn({
+            let error_notify = error_notify.clone();
+            let callback = callback.clone();
+
+            move || -> Result<(), VideoEncoderError> {
+                // Notify callback that stream is starting
+                if let Err(e) = callback.lock().on_stream_start() {
+                    eprintln!("Failed to notify stream start: {}", e);
+                }
+
+                let result = transcode.TranscodeAsync();
+
+                if result.is_err() {
+                    error_notify.store(true, atomic::Ordering::Relaxed);
+                }
+
+                result?.get()?;
+
+                // Notify callback that stream is ending
+                if let Err(e) = callback.lock().on_stream_end() {
+                    eprintln!("Failed to notify stream end: {}", e);
+                }
+
+                drop(media_transcoder);
+
+                Ok(())
+            }
+        });
+
+        // Start callback processing thread
+        let callback_thread = thread::spawn({
+            let callback = callback.clone();
+            move || {
+                while let Ok(encoded_frame) = encoded_frame_receiver.recv() {
+                    if let Err(e) = callback.lock().on_video_frame(encoded_frame) {
+                        eprintln!("Failed to process video frame: {}", e);
+                    }
+                }
+            }
+        });
+
+        let audio_callback_thread = thread::spawn({
+            let callback = callback.clone();
+            move || {
+                while let Ok(encoded_audio) = encoded_audio_receiver.recv() {
+                    if let Err(e) = callback.lock().on_audio_frame(encoded_audio) {
+                        eprintln!("Failed to process audio frame: {}", e);
+                    }
+                }
+            }
+        });
+
+        Ok(Self {
+            first_timestamp: None,
+            frame_sender,
+            audio_sender,
+            sample_requested,
+            media_stream_source,
+            starting,
+            transcode_thread: Some(transcode_thread),
+            frame_notify,
+            audio_notify,
+            error_notify,
+            is_video_disabled,
+            is_audio_disabled,
+            callback,
+            encoded_frame_sender,
+            encoded_audio_sender,
+        })
+    }
+
+    /// Sends a video frame to the streaming video encoder for encoding.
+    ///
+    /// # Arguments
+    ///
+    /// * `frame` - A mutable reference to the `Frame` to be encoded.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the frame is successfully sent for encoding, or a `VideoEncoderError`
+    /// if an error occurs.
+    #[inline]
+    pub fn send_frame(&mut self, frame: &mut Frame) -> Result<(), VideoEncoderError> {
+        if self.is_video_disabled {
+            return Err(VideoEncoderError::VideoDisabled);
+        }
+
+        let timestamp = match self.first_timestamp {
+            Some(timestamp) => {
+                TimeSpan { Duration: frame.timestamp().Duration - timestamp.Duration }
+            }
+            None => {
+                let timestamp = frame.timestamp();
+                self.first_timestamp = Some(timestamp);
+                TimeSpan { Duration: 0 }
+            }
+        };
+
+        self.frame_sender.send(Some((
+            VideoEncoderSource::DirectX(SendDirectX::new(unsafe {
+                frame.as_raw_surface().clone()
+            })),
+            timestamp,
+        )))?;
+
+        let (lock, cvar) = &*self.frame_notify;
+        let mut processed = lock.lock();
+        if !*processed {
+            cvar.wait(&mut processed);
+        }
+        *processed = false;
+        drop(processed);
+
+        if self.error_notify.load(atomic::Ordering::Relaxed) {
+            if let Some(transcode_thread) = self.transcode_thread.take() {
+                transcode_thread.join().expect("Failed to join transcode thread")?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Sends a video frame with audio to the streaming video encoder for encoding.
+    ///
+    /// # Arguments
+    ///
+    /// * `frame` - A mutable reference to the `Frame` to be encoded.
+    /// * `audio_buffer` - A reference to the audio byte slice to be encoded.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the frame is successfully sent for encoding, or a `VideoEncoderError`
+    /// if an error occurs.
+    #[inline]
+    pub fn send_frame_with_audio(
+        &mut self,
+        frame: &mut Frame,
+        audio_buffer: &[u8],
+    ) -> Result<(), VideoEncoderError> {
+        if self.is_video_disabled {
+            return Err(VideoEncoderError::VideoDisabled);
+        }
+
+        if self.is_audio_disabled {
+            return Err(VideoEncoderError::AudioDisabled);
+        }
+
+        let timestamp = match self.first_timestamp {
+            Some(timestamp) => {
+                TimeSpan { Duration: frame.timestamp().Duration - timestamp.Duration }
+            }
+            None => {
+                let timestamp = frame.timestamp();
+                self.first_timestamp = Some(timestamp);
+                TimeSpan { Duration: 0 }
+            }
+        };
+
+        self.frame_sender.send(Some((
+            VideoEncoderSource::DirectX(SendDirectX::new(unsafe {
+                frame.as_raw_surface().clone()
+            })),
+            timestamp,
+        )))?;
+
+        let (lock, cvar) = &*self.frame_notify;
+        let mut processed = lock.lock();
+        if !*processed {
+            cvar.wait(&mut processed);
+        }
+        *processed = false;
+        drop(processed);
+
+        if self.error_notify.load(atomic::Ordering::Relaxed) {
+            if let Some(transcode_thread) = self.transcode_thread.take() {
+                transcode_thread.join().expect("Failed to join transcode thread")?;
+            }
+        }
+
+        self.audio_sender.send(Some((
+            AudioEncoderSource::Buffer((
+                SendDirectX::new(audio_buffer.as_ptr()),
+                audio_buffer.len(),
+            )),
+            timestamp,
+        )))?;
+
+        let (lock, cvar) = &*self.audio_notify;
+        let mut processed = lock.lock();
+        if !*processed {
+            cvar.wait(&mut processed);
+        }
+        *processed = false;
+        drop(processed);
+
+        if self.error_notify.load(atomic::Ordering::Relaxed) {
+            if let Some(transcode_thread) = self.transcode_thread.take() {
+                transcode_thread.join().expect("Failed to join transcode thread")?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Finishes encoding the video and performs any necessary cleanup.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the encoding is successfully finished, or a `VideoEncoderError` if an
+    /// error occurs.
+    #[inline]
+    pub fn finish(mut self) -> Result<(), VideoEncoderError> {
+        self.frame_sender.send(None)?;
+        self.audio_sender.send(None)?;
+
+        if let Some(transcode_thread) = self.transcode_thread.take() {
+            transcode_thread.join().expect("Failed to join transcode thread")?;
+        }
+
+        self.media_stream_source.RemoveStarting(self.starting)?;
+        self.media_stream_source.RemoveSampleRequested(self.sample_requested)?;
+
+        Ok(())
+    }
+}
+
+impl Drop for StreamingVideoEncoder {
+    #[inline]
+    fn drop(&mut self) {
+        let _ = self.frame_sender.send(None);
+
+        if let Some(transcode_thread) = self.transcode_thread.take() {
+            let _ = transcode_thread.join();
+        }
+    }
+}
+
+#[allow(clippy::non_send_fields_in_send_ty)]
+unsafe impl Send for StreamingVideoEncoder {}
