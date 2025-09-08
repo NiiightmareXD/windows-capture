@@ -24,7 +24,7 @@ use windows::Storage::Streams::{
     Buffer, DataReader, IRandomAccessStream, InMemoryRandomAccessStream, InputStreamOptions,
 };
 use windows::Storage::{FileAccessMode, StorageFile};
-use windows::core::{HSTRING, Interface};
+use windows::core::{Array, HSTRING, Interface};
 
 use crate::d3d11::SendDirectX;
 use crate::frame::{Frame, ImageFormat};
@@ -1408,10 +1408,11 @@ impl StreamingVideoEncoder {
 
                             // Extract encoded audio data and send to callback
                             let audio_data = sample.Buffer()?;
-                            let audio_buffer = CryptographicBuffer::CopyToByteArray(&audio_data)?;
-                            
+                            let mut audio_array: Array<u8> = Array::new();
+                            CryptographicBuffer::CopyToByteArray(&audio_data, &mut audio_array)?;
+
                             let encoded_audio = EncodedAudioFrame {
-                                data: audio_buffer.to_vec(),
+                                data: audio_array.as_slice().to_vec(),
                                 timestamp: timestamp.Duration,
                                 sample_count: audio_encoding_properties.SampleRate()? / 1000, // Approximate
                             };
@@ -1461,10 +1462,11 @@ impl StreamingVideoEncoder {
 
                             // Extract encoded video data and send to callback
                             let video_data = sample.Buffer()?;
-                            let video_buffer = CryptographicBuffer::CopyToByteArray(&video_data)?;
-                            
+                            let mut video_array: Array<u8> = Array::new();
+                            CryptographicBuffer::CopyToByteArray(&video_data, &mut video_array)?;
+
                             let encoded_frame = EncodedFrame {
-                                data: video_buffer.to_vec(),
+                                data: video_array.as_slice().to_vec(),
                                 timestamp: timestamp.Duration,
                                 frame_type: FrameType::DeltaFrame, // Default, could be determined from sample properties
                                 width: video_encoding_properties.Width()?,

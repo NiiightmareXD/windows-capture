@@ -3,6 +3,7 @@ use std::net::{TcpListener, TcpStream, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+use std::io::Write;
 
 use crate::encoder::{EncodedFrame, EncodedAudioFrame, FrameCallback};
 
@@ -128,7 +129,7 @@ impl TcpStreamServer {
         let frame_data = self.serialize_frame(&frame)?;
 
         // Remove disconnected clients
-        clients.retain(|client| {
+    clients.retain(|mut client| {
             if let Err(_) = client.write_all(&frame_data) {
                 false
             } else {
