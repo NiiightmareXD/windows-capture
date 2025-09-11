@@ -150,6 +150,99 @@ fn main() {
 }
 ```
 
+## Real-time Streaming
+
+Windows Capture now supports real-time video streaming without writing to files! This feature allows you to transmit encoded video frames over the network for live streaming applications.
+
+### Streaming Example
+
+```rust
+use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
+use windows_capture::encoder::{
+    AudioSettingsBuilder, ContainerSettingsBuilder, StreamingVideoEncoder, VideoSettingsBuilder,
+};
+use windows_capture::frame::Frame;
+use windows_capture::graphics_capture_api::InternalCaptureControl;
+use windows_capture::monitor::Monitor;
+use windows_capture::network::{NetworkCallback, NetworkConfig, Protocol};
+use windows_capture::settings::{
+    ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
+    MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
+};
+
+struct StreamingCapture {
+    encoder: Option<StreamingVideoEncoder>,
+    start: std::time::Instant,
+}
+
+impl GraphicsCaptureApiHandler for StreamingCapture {
+    type Flags = String;
+    type Error = Box<dyn std::error::Error + Send + Sync>;
+
+    fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
+        let monitor = Monitor::primary()?;
+        let width = monitor.width()?;
+        let height = monitor.height()?;
+
+        let video_settings = VideoSettingsBuilder::new(width, height);
+        let audio_settings = AudioSettingsBuilder::default().disabled(true);
+        let container_settings = ContainerSettingsBuilder::default();
+
+        // Create network callback for TCP streaming
+        let config = NetworkConfig {
+            protocol: Protocol::Tcp,
+            address: "127.0.0.1:8080".to_string(),
+            frame_rate: 30,
+            ..Default::default()
+        };
+        let callback = Box::new(NetworkCallback::new(config)?);
+
+        let encoder = StreamingVideoEncoder::new(
+            video_settings,
+            audio_settings,
+            container_settings,
+            callback,
+        )?;
+
+        Ok(Self {
+            encoder: Some(encoder),
+            start: std::time::Instant::now(),
+        })
+    }
+
+    fn on_frame_arrived(
+        &mut self,
+        frame: &mut Frame,
+        _capture_control: InternalCaptureControl,
+    ) -> Result<(), Self::Error> {
+        // Send the frame to the streaming encoder
+        self.encoder.as_mut().unwrap().send_frame(frame)?;
+        Ok(())
+    }
+}
+```
+
+### Supported Protocols
+
+- **TCP**: Reliable transmission for local network streaming
+- **UDP**: Fast transmission with potential packet loss
+- **File**: Save encoded frames to files for debugging
+- **WebRTC**: Real-time communication (planned)
+- **RTMP**: Streaming protocol (planned)
+
+### Running the Streaming Example
+
+```bash
+# Stream to TCP server
+cargo run --example streaming tcp
+
+# Stream to UDP client
+cargo run --example streaming udp
+
+# Save encoded frames to files
+cargo run --example streaming file
+```
+
 ## Documentation
 
 Detailed documentation for each API and type can be found [here](https://docs.rs/windows-capture).
