@@ -125,25 +125,7 @@ impl Monitor {
     /// Returns an `Error` if the monitor's name cannot be retrieved.
     #[inline]
     pub fn name(&self) -> Result<String, Error> {
-        let mut monitor_info = MONITORINFOEXW {
-            monitorInfo: MONITORINFO {
-                cbSize: u32::try_from(mem::size_of::<MONITORINFOEXW>()).unwrap(),
-                rcMonitor: RECT::default(),
-                rcWork: RECT::default(),
-                dwFlags: 0,
-            },
-            szDevice: [0; 32],
-        };
-        if unsafe {
-            !GetMonitorInfoW(
-                HMONITOR(self.as_raw_hmonitor()),
-                std::ptr::addr_of_mut!(monitor_info).cast(),
-            )
-            .as_bool()
-        } {
-            return Err(Error::FailedToGetMonitorInfo);
-        }
-
+        let device_name = self.device_name()?;
         let mut number_of_paths = 0;
         let mut number_of_modes = 0;
         unsafe {
@@ -169,22 +151,24 @@ impl Monitor {
         }
         .ok()?;
 
-        for path in paths {
+        for path in &paths {
             let mut source = DISPLAYCONFIG_SOURCE_DEVICE_NAME {
                 header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
                     r#type: DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
-                    size: u32::try_from(mem::size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>())
-                        .unwrap(),
+                    size: std::mem::size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32,
                     adapterId: path.sourceInfo.adapterId,
                     id: path.sourceInfo.id,
                 },
                 viewGdiDeviceName: [0; 32],
             };
 
-            let device_name = self.device_name()?;
+            if unsafe { DisplayConfigGetDeviceInfo(&mut source.header) } != 0 {
+                continue;
+            }
+
             let view_gdi_device_name = String::from_utf16(
-                &monitor_info
-                    .szDevice
+                &source
+                    .viewGdiDeviceName
                     .as_slice()
                     .iter()
                     .take_while(|ch| **ch != 0x0000)
@@ -192,14 +176,11 @@ impl Monitor {
                     .collect::<Vec<u16>>(),
             )?;
 
-            if unsafe { DisplayConfigGetDeviceInfo(&mut source.header) } == 0
-                && device_name == view_gdi_device_name
-            {
+            if view_gdi_device_name == device_name {
                 let mut target = DISPLAYCONFIG_TARGET_DEVICE_NAME {
                     header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
                         r#type: DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
-                        size: u32::try_from(mem::size_of::<DISPLAYCONFIG_TARGET_DEVICE_NAME>())
-                            .unwrap(),
+                        size: std::mem::size_of::<DISPLAYCONFIG_TARGET_DEVICE_NAME>() as u32,
                         adapterId: path.sourceInfo.adapterId,
                         id: path.targetInfo.id,
                     },
@@ -212,20 +193,18 @@ impl Monitor {
                     monitorDevicePath: [0; 128],
                 };
 
-                if unsafe { DisplayConfigGetDeviceInfo(&mut target.header) } == 0 {
-                    let name = String::from_utf16(
-                        &target
-                            .monitorFriendlyDeviceName
-                            .as_slice()
-                            .iter()
-                            .take_while(|ch| **ch != 0x0000)
-                            .copied()
-                            .collect::<Vec<u16>>(),
-                    )?;
-                    return Ok(name);
+                if unsafe { DisplayConfigGetDeviceInfo(&mut target.header) } != 0 {
+                    continue;
                 }
-
-                return Err(Error::FailedToGetMonitorInfo);
+                return Ok(String::from_utf16(
+                    &target
+                        .monitorFriendlyDeviceName
+                        .as_slice()
+                        .iter()
+                        .take_while(|ch| **ch != 0x0000)
+                        .copied()
+                        .collect::<Vec<u16>>(),
+                )?);
             }
         }
 

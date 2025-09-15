@@ -819,7 +819,7 @@ impl VideoEncoder {
 
     /// Sends a video frame (DirectX). Returns immediately.
     #[inline]
-    pub fn send_frame(&mut self, frame: &mut Frame) -> Result<(), VideoEncoderError> {
+    pub fn send_frame(&mut self, frame: &Frame) -> Result<(), VideoEncoderError> {
         if self.is_video_disabled {
             return Err(VideoEncoderError::VideoDisabled);
         }
