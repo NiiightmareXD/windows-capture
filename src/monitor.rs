@@ -20,7 +20,7 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 use windows::core::{BOOL, HSTRING, PCWSTR};
 
-use crate::settings::{CaptureItemTypes, TryIntoCaptureItemWithType};
+use crate::settings::{GraphicsCaptureItemWithDetails, TryIntoCaptureItemWithDetails};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -232,7 +232,7 @@ impl Monitor {
         Err(Error::NameNotFound)
     }
 
-    /// Returns the device name of the monitor (e.g., `\\.\DISPLAY1`).
+    /// Returns the device name of the monitor (for example, `\\.\DISPLAY1`).
     ///
     /// # Errors
     ///
@@ -271,7 +271,7 @@ impl Monitor {
         Ok(device_name)
     }
 
-    /// Returns the device string of the monitor (e.g., `NVIDIA GeForce RTX 4090`).
+    /// Returns the device string of the monitor (for example, `NVIDIA GeForce RTX 4090`).
     ///
     /// # Errors
     ///
@@ -454,17 +454,16 @@ impl Monitor {
 }
 
 // Implements `TryIntoCaptureItemWithType` for `Monitor` to convert it to a `GraphicsCaptureItem`.
-impl TryIntoCaptureItemWithType for Monitor {
+impl TryIntoCaptureItemWithDetails for Monitor {
     #[inline]
-    fn try_into_capture_item(
+    fn try_into_capture_item_with_details(
         self,
-    ) -> Result<(GraphicsCaptureItem, CaptureItemTypes), windows::core::Error> {
+    ) -> Result<GraphicsCaptureItemWithDetails, windows::core::Error> {
         let monitor = HMONITOR(self.as_raw_hmonitor());
 
         let interop = windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
-
         let item = unsafe { interop.CreateForMonitor(monitor)? };
 
-        Ok((item, CaptureItemTypes::Monitor(self)))
+        Ok(GraphicsCaptureItemWithDetails::Monitor((item, self)))
     }
 }

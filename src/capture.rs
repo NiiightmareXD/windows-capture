@@ -23,7 +23,7 @@ use windows_future::AsyncActionCompletedHandler;
 use crate::d3d11::{self, create_d3d_device};
 use crate::frame::Frame;
 use crate::graphics_capture_api::{self, GraphicsCaptureApi, InternalCaptureControl};
-use crate::settings::{Settings, TryIntoCaptureItemWithType};
+use crate::settings::{Settings, TryIntoCaptureItemWithDetails};
 
 #[derive(thiserror::Error, Debug)]
 pub enum CaptureControlError<E> {
@@ -47,7 +47,7 @@ pub struct CaptureControl<T: GraphicsCaptureApiHandler + Send + 'static, E> {
 }
 
 impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
-    /// Creates a new Capture Control struct.
+    /// Creates a new `CaptureControl` struct.
     ///
     /// # Arguments
     ///
@@ -69,7 +69,7 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
         Self { thread_handle: Some(thread_handle), halt_handle, callback }
     }
 
-    /// Checks to see if the capture thread is finished.
+    /// Checks whether the capture thread has finished.
     ///
     /// # Returns
     ///
@@ -113,7 +113,7 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
         self.callback.clone()
     }
 
-    /// Waits for the capturing thread to stop.
+    /// Waits for the capture thread to stop.
     ///
     /// # Returns
     ///
@@ -203,7 +203,7 @@ pub enum GraphicsCaptureApiError<E> {
     FrameHandlerError(E),
 }
 
-/// A struct representing the context of the capture handler.
+/// The context provided to the capture handler.
 pub struct Context<Flags> {
     /// The flags that are retrieved from the settings.
     pub flags: Flags,
@@ -213,7 +213,7 @@ pub struct Context<Flags> {
     pub device_context: ID3D11DeviceContext,
 }
 
-/// A trait representing a graphics capture handler.
+/// Trait implemented by types that handle graphics capture events.
 pub trait GraphicsCaptureApiHandler: Sized {
     /// The type of flags used to get the values from the settings.
     type Flags;
@@ -231,7 +231,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
     ///
     /// Returns `Ok(())` if the capture was successful; otherwise, it returns an error of type `GraphicsCaptureApiError`.
     #[inline]
-    fn start<T: TryIntoCaptureItemWithType>(
+    fn start<T: TryIntoCaptureItemWithDetails>(
         settings: Settings<Self::Flags, T>,
     ) -> Result<(), GraphicsCaptureApiError<Self::Error>>
     where
@@ -271,7 +271,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
         // Get current thread ID
         let thread_id = unsafe { GetCurrentThreadId() };
 
-        // Create direct3d device and context
+        // Create Direct3D device and context
         let (d3d_device, d3d_device_context) = create_d3d_device()?;
 
         // Start capture
@@ -286,17 +286,13 @@ pub trait GraphicsCaptureApiHandler: Sized {
         let callback =
             Arc::new(Mutex::new(Self::new(ctx).map_err(GraphicsCaptureApiError::NewHandlerError)?));
 
-        // Convert the item into a GraphicsCaptureItem and its type
-        let (item, item_type) = settings
-            .item
-            .try_into_capture_item()
-            .map_err(|_| GraphicsCaptureApiError::ItemConvertFailed)?;
-
         let mut capture = GraphicsCaptureApi::new(
             d3d_device,
             d3d_device_context,
-            item,
-            item_type,
+            settings
+                .item
+                .try_into_capture_item_with_details()
+                .map_err(|_| GraphicsCaptureApiError::ItemConvertFailed)?,
             callback,
             settings.cursor_capture_settings,
             settings.draw_border_settings,
@@ -319,7 +315,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
             }
         }
 
-        // Shutdown dispatcher queue
+        // Shut down dispatcher queue
         let async_action = controller
             .ShutdownQueueAsync()
             .map_err(|_| GraphicsCaptureApiError::FailedToShutdownDispatcherQueue)?;
@@ -365,7 +361,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
     ///
     /// Returns a `Result` containing the `CaptureControl` if the capture was successful; otherwise, it returns an error of type `GraphicsCaptureApiError`.
     #[inline]
-    fn start_free_threaded<T: TryIntoCaptureItemWithType + Send + 'static>(
+    fn start_free_threaded<T: TryIntoCaptureItemWithDetails + Send + 'static>(
         settings: Settings<Self::Flags, T>,
     ) -> Result<CaptureControl<Self, Self::Error>, GraphicsCaptureApiError<Self::Error>>
     where
@@ -427,17 +423,13 @@ pub trait GraphicsCaptureApiHandler: Sized {
                     Self::new(ctx).map_err(GraphicsCaptureApiError::NewHandlerError)?,
                 ));
 
-                // Convert the item into a GraphicsCaptureItem and its type
-                let (item, item_type) = settings
-                    .item
-                    .try_into_capture_item()
-                    .map_err(|_| GraphicsCaptureApiError::ItemConvertFailed)?;
-
                 let mut capture = GraphicsCaptureApi::new(
                     d3d_device,
                     d3d_device_context,
-                    item,
-                    item_type,
+                    settings
+                        .item
+                        .try_into_capture_item_with_details()
+                        .map_err(|_| GraphicsCaptureApiError::ItemConvertFailed)?,
                     callback.clone(),
                     settings.cursor_capture_settings,
                     settings.draw_border_settings,

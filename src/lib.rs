@@ -11,10 +11,10 @@
 //!
 //! ## Features
 //!
-//! - Only updates the frame when required.
+//! - Updates frames only when required
 //! - High performance.
-//! - Easy to use.
-//! - Latest screen capturing API.
+//! - Easy to use
+//! - Uses the latest screen capture API
 //!
 //! ## Installation
 //!
@@ -22,9 +22,9 @@
 //!
 //! ```toml
 //! [dependencies]
-//! windows-capture = "1.5.0"
+//! windows-capture = "1.5.0-alpha.1"
 //! ```
-//! or run this command
+//! Or run this command:
 //!
 //! ```text
 //! cargo add windows-capture
@@ -42,7 +42,7 @@
 //! };
 //! use windows_capture::frame::Frame;
 //! use windows_capture::graphics_capture_api::InternalCaptureControl;
-//! use windows_capture::monitor::Monitor;
+//! use windows_capture::graphics_capture_picker::GraphicsCapturePicker;
 //! use windows_capture::settings::{
 //!     ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
 //!     MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
@@ -57,8 +57,8 @@
 //! }
 //!
 //! impl GraphicsCaptureApiHandler for Capture {
-//!     // The type of flags used to get the values from the settings.
-//!     type Flags = String;
+//!     // The type of flags used to get the values from the settings, here they are the width and height.
+//!     type Flags = (i32, i32);
 //!
 //!     // The type of error that can be returned from `CaptureControl` and `start`
 //!     // functions.
@@ -67,10 +67,10 @@
 //!     // Function that will be called to create a new instance. The flags can be
 //!     // passed from settings.
 //!     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
-//!         println!("Created with Flags: {}", ctx.flags);
-//!
+//!         // If we didn't want to get the size from the settings, we could use frame.width() and frame.height()
+//!         // in the on_frame_arrived function, but we would need to create the encoder there.
 //!         let encoder = VideoEncoder::new(
-//!             VideoSettingsBuilder::new(1920, 1080),
+//!             VideoSettingsBuilder::new(ctx.flags.0 as u32, ctx.flags.1 as u32),
 //!             AudioSettingsBuilder::default().disabled(true),
 //!             ContainerSettingsBuilder::default(),
 //!             "video.mp4",
@@ -91,10 +91,9 @@
 //!         // Send the frame to the video encoder
 //!         self.encoder.as_mut().unwrap().send_frame(frame)?;
 //!
-//!         // Note: The frame has other uses too, for example, you can save a single frame
+//!         // The frame has other uses too, for example, you can save a single frame
 //!         // to a file, like this: frame.save_as_image("frame.png", ImageFormat::Png)?;
-//!         // Or get the raw data like this so you have full
-//!         // control: let data = frame.buffer()?;
+//!         // Or get the raw data like this so you have full control: let data = frame.buffer()?;
 //!
 //!         // Stop the capture after 6 seconds
 //!         if self.start.elapsed().as_secs() >= 6 {
@@ -118,12 +117,21 @@
 //!     }
 //! }
 //!
-//! // Gets the primary monitor, refer to the docs for other capture items.
-//! let primary_monitor = Monitor::primary().expect("There is no primary monitor");
+//! // Opens a dialog to pick a window or screen to capture; refer to the docs for other capture items.
+//! let item = GraphicsCapturePicker::pick_item().expect("Failed to pick item");
+//!
+//! // If the user canceled the selection, exit.
+//! let Some(item) = item else {
+//!     println!("No item selected");
+//!     return;
+//! };
+//!
+//! // Get the size of the item to pass to the settings.
+//! let size = item.size().expect("Failed to get item size");
 //!
 //! let settings = Settings::new(
 //!     // Item to capture
-//!     primary_monitor,
+//!     item,
 //!     // Capture cursor settings
 //!     CursorCaptureSettings::Default,
 //!     // Draw border settings
@@ -132,12 +140,12 @@
 //!     SecondaryWindowSettings::Default,
 //!     // Minimum update interval, if you want to change the frame rate limit (default is 60 FPS or 16.67 ms)
 //!     MinimumUpdateIntervalSettings::Default,
-//!     // Dirty region settings,
+//!     // Dirty region settings
 //!     DirtyRegionSettings::Default,
 //!     // The desired color format for the captured frame.
 //!     ColorFormat::Rgba8,
 //!     // Additional flags for the capture settings that will be passed to the user-defined `new` function.
-//!     "Yea this works".to_string(),
+//!     size,
 //! );
 //!
 //! // Starts the capture and takes control of the current thread.
@@ -149,7 +157,7 @@
 #![warn(clippy::multiple_crate_versions)] // Should update as soon as possible
 
 /// Exported for the trait bounds
-pub use windows::Graphics::Capture::GraphicsCaptureItem as WindowsCaptureGraphicsCaptureItem;
+pub use windows::Graphics::Capture::GraphicsCaptureItem;
 
 /// Contains the main capture functionality, including the `WindowsCaptureHandler` trait and related types.
 pub mod capture;
@@ -161,6 +169,8 @@ pub mod encoder;
 pub mod frame;
 /// Contains the types and functions related to the Graphics Capture API.
 pub mod graphics_capture_api;
+/// Contains the functionality for displaying a picker to select a window or screen to capture.
+pub mod graphics_capture_picker;
 /// Contains the functionality for working with monitors and screen information.
 pub mod monitor;
 /// Contains the `Settings` struct and related types for configuring the capture settings.

@@ -1,7 +1,7 @@
 use std::ptr;
 
 use windows::Graphics::Capture::GraphicsCaptureItem;
-use windows::Win32::Foundation::{HWND, LPARAM, RECT, TRUE};
+use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, RECT, TRUE};
 use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONULL, MonitorFromWindow};
 use windows::Win32::System::ProcessStatus::GetModuleBaseNameW;
@@ -18,7 +18,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{BOOL, HSTRING, Owned};
 
 use crate::monitor::Monitor;
-use crate::settings::{CaptureItemTypes, TryIntoCaptureItemWithType};
+use crate::settings::{GraphicsCaptureItemWithDetails, TryIntoCaptureItemWithDetails};
 
 #[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
 pub enum Error {
@@ -123,18 +123,18 @@ impl Window {
     pub fn title(&self) -> Result<String, Error> {
         let len = unsafe { GetWindowTextLengthW(self.window) };
 
-        let mut name = vec![0u16; usize::try_from(len).unwrap() + 1];
-        if len >= 1 {
-            let copied = unsafe { GetWindowTextW(self.window, &mut name) };
-            if copied == 0 {
-                return Ok(String::new());
-            }
+        if len == 0 {
+            return Ok(String::new());
         }
 
-        let name = String::from_utf16(
-            &name.as_slice().iter().take_while(|ch| **ch != 0x0000).copied().collect::<Vec<u16>>(),
-        )
-        .map_err(|_| Error::FailedToConvertWindowsString)?;
+        let mut buf = vec![0u16; usize::try_from(len).unwrap() + 1];
+        let copied = unsafe { GetWindowTextW(self.window, &mut buf) };
+        if copied == 0 {
+            return Ok(String::new());
+        }
+
+        let name = String::from_utf16(&buf[..copied as usize])
+            .map_err(|_| Error::FailedToConvertWindowsString)?;
 
         Ok(name)
     }
@@ -150,7 +150,7 @@ impl Window {
         unsafe { GetWindowThreadProcessId(self.window, Some(&mut id)) };
 
         if id == 0 {
-            return Err(windows::core::Error::from_win32().into());
+            return Err(Error::WindowsError(unsafe { GetLastError().into() }));
         }
 
         Ok(id)
@@ -175,7 +175,7 @@ impl Window {
         let size = unsafe { GetModuleBaseNameW(*process, None, &mut name) };
 
         if size == 0 {
-            return Err(windows::core::Error::from_win32().into());
+            return Err(Error::WindowsError(unsafe { GetLastError().into() }));
         }
 
         let name = String::from_utf16(
@@ -211,7 +211,7 @@ impl Window {
         if result.is_ok() {
             Ok(rect)
         } else {
-            Err(Error::WindowsError(windows::core::Error::from_win32()))
+            Err(Error::WindowsError(unsafe { GetLastError().into() }))
         }
     }
 
@@ -244,7 +244,7 @@ impl Window {
         Ok(actual_title_height as u32)
     }
 
-    /// Checks if the window is a valid target for capture.
+    /// Checks whether the window is a valid target for capture.
     ///
     /// # Returns
     ///
@@ -303,6 +303,26 @@ impl Window {
         Ok(windows)
     }
 
+    /// Returns the width of the window in pixels.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` if the width cannot be determined.
+    pub fn width(&self) -> Result<i32, Error> {
+        let rect = self.rect()?;
+        Ok(rect.right - rect.left)
+    }
+
+    /// Returns the height of the window in pixels.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` if the height cannot be determined.
+    pub fn height(&self) -> Result<i32, Error> {
+        let rect = self.rect()?;
+        Ok(rect.bottom - rect.top)
+    }
+
     /// Creates a `Window` instance from a raw `HWND` handle.
     ///
     /// # Arguments
@@ -335,16 +355,16 @@ impl Window {
 }
 
 // Implements `TryIntoCaptureItemWithType` for `Window` to convert it to a `GraphicsCaptureItem`.
-impl TryIntoCaptureItemWithType for Window {
+impl TryIntoCaptureItemWithDetails for Window {
     #[inline]
-    fn try_into_capture_item(
+    fn try_into_capture_item_with_details(
         self,
-    ) -> Result<(GraphicsCaptureItem, CaptureItemTypes), windows::core::Error> {
+    ) -> Result<GraphicsCaptureItemWithDetails, windows::core::Error> {
         let window = HWND(self.as_raw_hwnd());
 
         let interop = windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
         let item = unsafe { interop.CreateForWindow(window)? };
 
-        Ok((item, CaptureItemTypes::Window(self)))
+        Ok(GraphicsCaptureItemWithDetails::Window((item, self)))
     }
 }

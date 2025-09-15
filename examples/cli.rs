@@ -13,7 +13,8 @@ use windows_capture::graphics_capture_api::InternalCaptureControl;
 use windows_capture::monitor::Monitor;
 use windows_capture::settings::{
     ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
-    MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings, TryIntoCaptureItemWithType,
+    MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
+    TryIntoCaptureItemWithDetails,
 };
 use windows_capture::window::Window;
 
@@ -261,7 +262,7 @@ fn parse_dirty_region(s: &str) -> DirtyRegionSettings {
 }
 
 /// Starts the capture process with the specified settings.
-fn start_capture<T: TryIntoCaptureItemWithType>(
+fn start_capture<T: TryIntoCaptureItemWithDetails>(
     capture_item: T,
     cursor_capture_settings: CursorCaptureSettings,
     draw_border_settings: DrawBorderSettings,

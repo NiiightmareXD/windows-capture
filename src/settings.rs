@@ -2,23 +2,26 @@ use std::time::Duration;
 
 use windows::Graphics::Capture::GraphicsCaptureItem;
 
+use crate::graphics_capture_picker::HwndGuard;
 use crate::monitor::Monitor;
 use crate::window::Window;
 
-/// An enumeration of the types of items that can be captured.
-pub enum CaptureItemTypes {
+/// An enumeration of item types that can be captured.
+pub enum GraphicsCaptureItemWithDetails {
     /// A display monitor.
-    Monitor(Monitor),
+    Monitor((GraphicsCaptureItem, Monitor)),
     /// An application window.
-    Window(Window),
+    Window((GraphicsCaptureItem, Window)),
+    /// An unknown capture item type.
+    Unknown((GraphicsCaptureItem, HwndGuard)),
 }
 
 /// A trait for types that can be converted into a `GraphicsCaptureItem`.
-pub trait TryIntoCaptureItemWithType {
-    /// Attempts to convert the object into a `GraphicsCaptureItem` and its corresponding `CaptureItemTypes` variant.
-    fn try_into_capture_item(
+pub trait TryIntoCaptureItemWithDetails {
+    /// Attempts to convert the object into a `GraphicsCaptureItem` and its corresponding `GraphicsCaptureItemWithDetails` variant.
+    fn try_into_capture_item_with_details(
         self,
-    ) -> Result<(GraphicsCaptureItem, CaptureItemTypes), windows::core::Error>;
+    ) -> Result<GraphicsCaptureItemWithDetails, windows::core::Error>;
 }
 
 /// Specifies the pixel format for the captured frame.
@@ -95,7 +98,7 @@ pub enum DirtyRegionSettings {
 
 /// Represents the settings for a screen capture session.
 #[derive(Eq, PartialEq, Clone, Debug)]
-pub struct Settings<Flags, T: TryIntoCaptureItemWithType> {
+pub struct Settings<Flags, T: TryIntoCaptureItemWithDetails> {
     /// The item to be captured (e.g., a `Window` or `Monitor`).
     pub(crate) item: T,
     /// Specifies whether the cursor should be captured.
@@ -114,7 +117,7 @@ pub struct Settings<Flags, T: TryIntoCaptureItemWithType> {
     pub(crate) flags: Flags,
 }
 
-impl<Flags, T: TryIntoCaptureItemWithType> Settings<Flags, T> {
+impl<Flags, T: TryIntoCaptureItemWithDetails> Settings<Flags, T> {
     /// Creates a new `Settings` configuration.
     ///
     /// # Arguments

@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{self, AtomicBool};
+use std::sync::atomic::{self, AtomicBool, AtomicI32};
 
 use parking_lot::Mutex;
 use windows::Foundation::Metadata::ApiInformation;
@@ -22,8 +22,8 @@ use crate::capture::GraphicsCaptureApiHandler;
 use crate::d3d11::{self, SendDirectX, create_direct3d_device};
 use crate::frame::Frame;
 use crate::settings::{
-    CaptureItemTypes, ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
-    MinimumUpdateIntervalSettings, SecondaryWindowSettings,
+    ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
+    GraphicsCaptureItemWithDetails, MinimumUpdateIntervalSettings, SecondaryWindowSettings,
 };
 
 #[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
@@ -89,7 +89,7 @@ impl InternalCaptureControl {
 /// Manages a graphics capture session using the Windows Graphics Capture API.
 pub struct GraphicsCaptureApi {
     /// The `GraphicsCaptureItem` to be captured (e.g., a window or monitor).
-    item: GraphicsCaptureItem,
+    item_with_details: GraphicsCaptureItemWithDetails,
     /// The Direct3D 11 device used for the capture.
     _d3d_device: ID3D11Device,
     /// The WinRT `IDirect3DDevice` wrapper.
@@ -141,8 +141,7 @@ impl GraphicsCaptureApi {
     >(
         d3d_device: ID3D11Device,
         d3d_device_context: ID3D11DeviceContext,
-        item: GraphicsCaptureItem,
-        item_type: CaptureItemTypes,
+        item_with_details: GraphicsCaptureItemWithDetails,
         callback: Arc<Mutex<T>>,
         cursor_capture_settings: CursorCaptureSettings,
         draw_border_settings: DrawBorderSettings,
@@ -189,9 +188,16 @@ impl GraphicsCaptureApi {
         }
 
         // Pre-calculate the title bar height so each frame doesn't need to do it
-        let title_bar_height = match item_type {
-            CaptureItemTypes::Window(window) => Some(window.title_bar_height()?),
-            CaptureItemTypes::Monitor(_) => None,
+        let title_bar_height = match item_with_details {
+            GraphicsCaptureItemWithDetails::Window((_, window)) => Some(window.title_bar_height()?),
+            GraphicsCaptureItemWithDetails::Monitor(_) => None,
+            GraphicsCaptureItemWithDetails::Unknown(_) => None,
+        };
+
+        let item = match &item_with_details {
+            GraphicsCaptureItemWithDetails::Window((item, _)) => item,
+            GraphicsCaptureItemWithDetails::Monitor((item, _)) => item,
+            GraphicsCaptureItemWithDetails::Unknown((item, _)) => item,
         };
 
         // Create DirectX devices
@@ -205,11 +211,7 @@ impl GraphicsCaptureApi {
         let frame_pool = Arc::new(frame_pool);
 
         // Create capture session
-        let session = frame_pool.CreateCaptureSession(&item)?;
-
-        // Preallocate a buffer for frame data to avoid reallocations.
-        // The size is based on a 4K display (3840x2160) with 4 bytes per pixel (RGBA).
-        let mut buffer = vec![0u8; 3840 * 2160 * 4];
+        let session = frame_pool.CreateCaptureSession(item)?;
 
         // Indicates if the capture is closed
         let halt = Arc::new(AtomicBool::new(false));
@@ -254,7 +256,9 @@ impl GraphicsCaptureApi {
             let context = d3d_device_context.clone();
             let result_frame_pool = result;
 
-            let mut last_size = item.Size()?;
+            let last_size = item.Size()?;
+            let last_size =
+                Arc::new((AtomicI32::new(last_size.Width), AtomicI32::new(last_size.Height)));
             let callback_frame_pool = callback;
             let direct3d_device_recreate = SendDirectX::new(direct3d_device.clone());
 
@@ -269,7 +273,6 @@ impl GraphicsCaptureApi {
                     .as_ref()
                     .expect("FrameArrived parameter was None this should never happen.")
                     .TryGetNextFrame()?;
-                let timestamp = frame.SystemRelativeTime()?;
 
                 // Get frame content size
                 let frame_content_size = frame.ContentSize()?;
@@ -287,8 +290,8 @@ impl GraphicsCaptureApi {
                 unsafe { frame_texture.GetDesc(&mut desc) }
 
                 // Check if the size has been changed
-                if frame_content_size.Width != last_size.Width
-                    || frame_content_size.Height != last_size.Height
+                if frame_content_size.Width != last_size.0.load(atomic::Ordering::Relaxed)
+                    || frame_content_size.Height != last_size.1.load(atomic::Ordering::Relaxed)
                 {
                     let direct3d_device_recreate = &direct3d_device_recreate;
                     frame_pool_recreate.Recreate(
@@ -298,7 +301,8 @@ impl GraphicsCaptureApi {
                         frame_content_size,
                     )?;
 
-                    last_size = frame_content_size;
+                    last_size.0.store(frame_content_size.Width, atomic::Ordering::Relaxed);
+                    last_size.1.store(frame_content_size.Height, atomic::Ordering::Relaxed);
 
                     return Ok(());
                 }
@@ -309,12 +313,11 @@ impl GraphicsCaptureApi {
 
                 // Create a frame
                 let mut frame = Frame::new(
+                    frame,
                     &d3d_device_frame_pool,
                     frame_surface,
                     frame_texture,
-                    timestamp,
                     &context,
-                    &mut buffer,
                     texture_width,
                     texture_height,
                     color_format,
@@ -424,7 +427,7 @@ impl GraphicsCaptureApi {
         }
 
         Ok(Self {
-            item,
+            item_with_details,
             _d3d_device: d3d_device,
             _direct3d_device: direct3d_device,
             _d3d_device_context: d3d_device_context,
@@ -437,7 +440,7 @@ impl GraphicsCaptureApi {
         })
     }
 
-    /// Start the capture.
+    /// Starts the capture.
     ///
     /// # Returns
     ///
@@ -470,12 +473,17 @@ impl GraphicsCaptureApi {
             session.Close().expect("Failed to Close Capture Session");
         }
 
-        self.item
-            .RemoveClosed(self.capture_closed_event_token)
+        let item = match &self.item_with_details {
+            GraphicsCaptureItemWithDetails::Window((item, _)) => item,
+            GraphicsCaptureItemWithDetails::Monitor((item, _)) => item,
+            GraphicsCaptureItemWithDetails::Unknown((item, _)) => item,
+        };
+
+        item.RemoveClosed(self.capture_closed_event_token)
             .expect("Failed to remove Capture Session Closed event handler");
     }
 
-    /// Get the halt handle.
+    /// Gets the halt handle.
     ///
     /// # Returns
     ///
@@ -486,7 +494,7 @@ impl GraphicsCaptureApi {
         self.halt.clone()
     }
 
-    /// Check if the Windows Graphics Capture API is supported.
+    /// Checks if the Windows Graphics Capture API is supported.
     ///
     /// # Returns
     ///
@@ -576,6 +584,12 @@ impl Drop for GraphicsCaptureApi {
             let _ = session.Close();
         }
 
-        let _ = self.item.RemoveClosed(self.capture_closed_event_token);
+        let item = match &self.item_with_details {
+            GraphicsCaptureItemWithDetails::Window((item, _)) => item,
+            GraphicsCaptureItemWithDetails::Monitor((item, _)) => item,
+            GraphicsCaptureItemWithDetails::Unknown((item, _)) => item,
+        };
+
+        let _ = item.RemoveClosed(self.capture_closed_event_token);
     }
 }

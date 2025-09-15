@@ -1,28 +1,28 @@
-# Windows Capture &emsp; [![Licence]][Licence URL] [![Build Status]][repository] [![Latest Version]][pypi.org]
+# Windows Capture &emsp; [![Licence]][Licence URL] [![Build Status]][repository] [![Latest Version]][pypi.org] [![Sponsors]][Sponsors URL]
 
 [Licence]: https://img.shields.io/crates/l/windows-capture
 [Licence URL]: https://github.com/NiiightmareXD/windows-capture/blob/main/windows-capture-python/LICENCE
-
 [Build Status]: https://img.shields.io/github/actions/workflow/status/NiiightmareXD/windows-capture/rust.yml
 [repository]: https://github.com/NiiightmareXD/windows-capture/tree/main/windows-capture-python
-
 [Latest Version]: https://img.shields.io/pypi/v/windows-capture
 [pypi.org]: https://pypi.org/project/windows-capture
+[Sponsors]: https://img.shields.io/github/sponsors/NiiightmareXD
+[Sponsors URL]: https://github.com/sponsors/NiiightmareXD
 
 **Windows Capture** is a highly efficient Rust and Python library that enables you to capture the screen using the Graphics Capture API effortlessly. This library allows you to easily capture the screen of your Windows-based computer and use it for various purposes, such as creating instructional videos, taking screenshots, or recording your gameplay. With its intuitive interface and robust functionality, Windows Capture is an excellent choice for anyone looking for a reliable, easy-to-use screen-capturing solution.
 
-**Note** this README.md is for [Python library](https://github.com/NiiightmareXD/windows-capture/tree/main/windows-capture-python) Rust library can be found [here](https://github.com/NiiightmareXD/windows-capture)  
+**Note** this README.md is for [Python library](https://github.com/NiiightmareXD/windows-capture/tree/main/windows-capture-python) Rust library can be found [here](https://github.com/NiiightmareXD/windows-capture)
 
 ## Features
 
-- Only Updates The Frame When Required.
-- High Performance.
-- Easy To Use.
-- Latest Screen Capturing API.
+- Updates frames only when required
+- High performance
+- Easy to use
+- Uses the latest screen capture API
 
 ## Installation
 
-Run this command
+Install from PyPI:
 
 ```
 pip install windows-capture
@@ -33,7 +33,7 @@ pip install windows-capture
 ```python
 from windows_capture import WindowsCapture, Frame, InternalCaptureControl
 
-# Every Error From on_closed and on_frame_arrived Will End Up Here
+# Any error from on_closed and on_frame_arrived will surface here
 capture = WindowsCapture(
     cursor_capture=None,
     draw_border=None,
@@ -42,23 +42,23 @@ capture = WindowsCapture(
 )
 
 
-# Called Every Time A New Frame Is Available
+# Called every time a new frame is available
 @capture.event
 def on_frame_arrived(frame: Frame, capture_control: InternalCaptureControl):
-    print("New Frame Arrived")
+    print("New frame arrived")
 
-    # Save The Frame As An Image To The Specified Path
+    # Save the frame as an image to the specified path
     frame.save_as_image("image.png")
 
-    # Gracefully Stop The Capture Thread
+    # Gracefully stop the capture thread
     capture_control.stop()
 
 
-# Called When The Capture Item Closes Usually When The Window Closes, Capture
-# Session Will End After This Function Ends
+# Called when the capture item closes (usually when the window closes).
+# The capture session will end after this function returns.
 @capture.event
 def on_closed():
-    print("Capture Session Closed")
+    print("Capture session closed")
 
 
 capture.start()
@@ -76,4 +76,4 @@ Contributions are welcome! If you find a bug or want to add new features to the 
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [MIT License](LICENCE).

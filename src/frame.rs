@@ -4,6 +4,7 @@ use std::{io, ptr, slice};
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use windows::Foundation::TimeSpan;
+use windows::Graphics::Capture::Direct3D11CaptureFrame;
 use windows::Graphics::DirectX::Direct3D11::IDirect3DSurface;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CPU_ACCESS_WRITE, D3D11_MAP_READ_WRITE,
@@ -41,6 +42,15 @@ pub enum ImageFormat {
     JpegXr,
 }
 
+/// Represents a rectangular dirty region within a frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DirtyRegion {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
 /// Represents a frame captured from a graphics capture item.
 ///
 /// # Example
@@ -50,12 +60,11 @@ pub enum ImageFormat {
 /// buffer.save_as_image("screenshot.png", ImageFormat::Png)?;
 /// ```
 pub struct Frame<'a> {
+    capture_frame: Direct3D11CaptureFrame,
     d3d_device: &'a ID3D11Device,
     frame_surface: IDirect3DSurface,
     frame_texture: ID3D11Texture2D,
-    timestamp: TimeSpan,
     context: &'a ID3D11DeviceContext,
-    buffer: &'a mut Vec<u8>,
     width: u32,
     height: u32,
     color_format: ColorFormat,
@@ -67,12 +76,11 @@ impl<'a> Frame<'a> {
     ///
     /// # Arguments
     ///
+    /// * `capture_frame` - The `Direct3D11CaptureFrame` representing the captured frame.
     /// * `d3d_device` - The `ID3D11Device` used for creating the frame.
     /// * `frame_surface` - The `IDirect3DSurface` representing the frame's surface.
     /// * `frame_texture` - The `ID3D11Texture2D` representing the frame's texture.
-    /// * `timestamp` - The `TimeSpan` representing the frame's timestamp, in 100-nanosecond units.
     /// * `context` - The `ID3D11DeviceContext` used for copying the texture.
-    /// * `buffer` - A mutable reference to the buffer for the frame data.
     /// * `width` - The width of the frame.
     /// * `height` - The height of the frame.
     /// * `color_format` - The `ColorFormat` of the frame.
@@ -85,24 +93,22 @@ impl<'a> Frame<'a> {
     #[must_use]
     #[inline]
     pub const fn new(
+        capture_frame: Direct3D11CaptureFrame,
         d3d_device: &'a ID3D11Device,
         frame_surface: IDirect3DSurface,
         frame_texture: ID3D11Texture2D,
-        timestamp: TimeSpan,
         context: &'a ID3D11DeviceContext,
-        buffer: &'a mut Vec<u8>,
         width: u32,
         height: u32,
         color_format: ColorFormat,
         title_bar_height: Option<u32>,
     ) -> Self {
         Self {
+            capture_frame,
             d3d_device,
             frame_surface,
             frame_texture,
-            timestamp,
             context,
-            buffer,
             width,
             height,
             color_format,
@@ -119,6 +125,20 @@ impl<'a> Frame<'a> {
     #[inline]
     pub const fn width(&self) -> u32 {
         self.width
+    }
+    /// Gets the dirty regions of the frame.
+    ///
+    /// # Returns
+    ///
+    /// A vector of `RectInt32` representing the dirty regions of the frame.
+    #[inline]
+    pub fn dirty_regions(&self) -> Result<Vec<DirtyRegion>, windows::core::Error> {
+        Ok(self
+            .capture_frame
+            .DirtyRegions()?
+            .into_iter()
+            .map(|r| DirtyRegion { x: r.X, y: r.Y, width: r.Width, height: r.Height })
+            .collect())
     }
 
     /// Gets the height of the frame.
@@ -137,10 +157,9 @@ impl<'a> Frame<'a> {
     /// # Returns
     ///
     /// The timestamp of the frame.
-    #[must_use]
     #[inline]
-    pub const fn timestamp(&self) -> TimeSpan {
-        self.timestamp
+    pub fn timestamp(&self) -> Result<TimeSpan, windows::core::Error> {
+        self.capture_frame.SystemRelativeTime()
     }
 
     /// Gets the color format of the frame.
@@ -192,7 +211,7 @@ impl<'a> Frame<'a> {
     ///
     /// A `FrameBuffer` containing the frame data.
     #[inline]
-    pub fn buffer(&mut self) -> Result<FrameBuffer, Error> {
+    pub fn buffer(&'_ mut self) -> Result<FrameBuffer<'_>, Error> {
         // Texture Settings
         let texture_desc = D3D11_TEXTURE2D_DESC {
             Width: self.width,
@@ -237,7 +256,6 @@ impl<'a> Frame<'a> {
         // Create a frame buffer from the slice
         let frame_buffer = FrameBuffer::new(
             mapped_frame_data,
-            self.buffer,
             self.width,
             self.height,
             mapped_resource.RowPitch,
@@ -248,26 +266,26 @@ impl<'a> Frame<'a> {
         Ok(frame_buffer)
     }
 
-    /// Get a cropped frame buffer.
+    /// Gets a cropped frame buffer.
     ///
     /// # Arguments
     ///
-    /// * `start_width` - The starting width of the cropped frame.
-    /// * `start_height` - The starting height of the cropped frame.
-    /// * `end_width` - The ending width of the cropped frame.
-    /// * `end_height` - The ending height of the cropped frame.
+    /// * `start_width` - The starting x-coordinate of the crop region.
+    /// * `start_height` - The starting y-coordinate of the crop region.
+    /// * `end_width` - The ending x-coordinate (exclusive) of the crop region.
+    /// * `end_height` - The ending y-coordinate (exclusive) of the crop region.
     ///
     /// # Returns
     ///
     /// A `FrameBuffer` containing the cropped frame data.
     #[inline]
     pub fn buffer_crop(
-        &mut self,
+        &'_ mut self,
         start_width: u32,
         start_height: u32,
         end_width: u32,
         end_height: u32,
-    ) -> Result<FrameBuffer, Error> {
+    ) -> Result<FrameBuffer<'_>, Error> {
         if start_width >= end_width || start_height >= end_height {
             return Err(Error::InvalidSize);
         }
@@ -337,7 +355,6 @@ impl<'a> Frame<'a> {
         // Create a frame buffer from the slice
         let frame_buffer = FrameBuffer::new(
             mapped_frame_data,
-            self.buffer,
             texture_width,
             texture_height,
             mapped_resource.RowPitch,
@@ -354,7 +371,7 @@ impl<'a> Frame<'a> {
     ///
     /// A `FrameBuffer` containing the frame data without the title bar.
     #[inline]
-    pub fn buffer_without_title_bar(&mut self) -> Result<FrameBuffer, Error> {
+    pub fn buffer_without_title_bar(&'_ mut self) -> Result<FrameBuffer<'_>, Error> {
         if let Some(title_bar_height) = self.title_bar_height {
             if title_bar_height >= self.height {
                 return Err(Error::InvalidTitleBarSize);
@@ -366,7 +383,7 @@ impl<'a> Frame<'a> {
         }
     }
 
-    /// Save the frame buffer as an image to the specified path.
+    /// Saves the frame buffer as an image to the specified path.
     ///
     /// # Arguments
     ///
@@ -400,7 +417,6 @@ impl<'a> Frame<'a> {
 /// ```
 pub struct FrameBuffer<'a> {
     raw_buffer: &'a mut [u8],
-    buffer: &'a mut Vec<u8>,
     width: u32,
     height: u32,
     row_pitch: u32,
@@ -414,7 +430,6 @@ impl<'a> FrameBuffer<'a> {
     /// # Arguments
     ///
     /// * `raw_buffer` - A mutable reference to the raw pixel data buffer, which may include padding.
-    /// * `buffer` - A mutable reference to a buffer used for copying pixel data without padding.
     /// * `width` - The width of the frame buffer.
     /// * `height` - The height of the frame buffer.
     /// * `row_pitch` - The row pitch of the frame buffer.
@@ -428,14 +443,13 @@ impl<'a> FrameBuffer<'a> {
     #[inline]
     pub const fn new(
         raw_buffer: &'a mut [u8],
-        buffer: &'a mut Vec<u8>,
         width: u32,
         height: u32,
         row_pitch: u32,
         depth_pitch: u32,
         color_format: ColorFormat,
     ) -> Self {
-        Self { raw_buffer, buffer, width, height, row_pitch, depth_pitch, color_format }
+        Self { raw_buffer, width, height, row_pitch, depth_pitch, color_format }
     }
 
     /// Gets the width of the frame buffer.
@@ -482,11 +496,15 @@ impl<'a> FrameBuffer<'a> {
 
     /// Gets the pixel data without padding.
     ///
+    /// # Arguments
+    ///
+    /// * `buffer` - A mutable reference to a buffer used for copying pixel data without padding. This buffer will be resized if necessary and used for performance optimization.
+    ///
     /// # Returns
     ///
-    /// A mutable reference to the buffer containing pixel data without padding.
+    /// A reference to the buffer containing pixel data without padding.
     #[inline]
-    pub fn as_nopadding_buffer(&mut self) -> Result<&mut [u8], Error> {
+    pub fn as_nopadding_buffer<'b>(&'b self, buffer: &'b mut Vec<u8>) -> Result<&'b [u8], Error> {
         if !self.has_padding() {
             return Ok(self.raw_buffer);
         }
@@ -498,12 +516,12 @@ impl<'a> FrameBuffer<'a> {
         };
 
         let frame_size = (self.width * self.height * multiplier) as usize;
-        if self.buffer.capacity() < frame_size {
-            self.buffer.resize(frame_size, 0);
+        if buffer.capacity() < frame_size {
+            buffer.resize(frame_size, 0);
         }
 
         let width_size = (self.width * multiplier) as usize;
-        let buffer_address = self.buffer.as_mut_ptr() as isize;
+        let buffer_address = buffer.as_mut_ptr() as isize;
         (0..self.height).into_par_iter().for_each(|y| {
             let index = (y * self.row_pitch) as usize;
             let ptr = buffer_address as *mut u8;
@@ -517,10 +535,10 @@ impl<'a> FrameBuffer<'a> {
             }
         });
 
-        Ok(&mut self.buffer[0..frame_size])
+        Ok(&buffer[0..frame_size])
     }
 
-    /// Save the frame buffer as an image to the specified path.
+    /// Saves the frame buffer as an image to the specified path.
     ///
     /// # Arguments
     ///
@@ -539,8 +557,9 @@ impl<'a> FrameBuffer<'a> {
         let width = self.width;
         let height = self.height;
 
+        let mut buffer = Vec::new();
         let bytes = ImageEncoder::new(format, self.color_format).encode(
-            self.as_nopadding_buffer()?,
+            self.as_nopadding_buffer(&mut buffer)?,
             width,
             height,
         )?;
