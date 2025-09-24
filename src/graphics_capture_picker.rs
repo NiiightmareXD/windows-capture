@@ -1,13 +1,10 @@
 use windows::Graphics::Capture::GraphicsCaptureItem;
-use windows::Win32::Foundation::{
-    ERROR_CLASS_ALREADY_EXISTS, GetLastError, HWND, LPARAM, LRESULT, WPARAM,
-};
+use windows::Win32::Foundation::{ERROR_CLASS_ALREADY_EXISTS, GetLastError, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::IInitializeWithWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, MSG,
-    PM_REMOVE, PeekMessageW, RegisterClassExW, TranslateMessage, WM_DESTROY, WNDCLASSEXW,
-    WS_EX_TOOLWINDOW, WS_POPUP, WS_VISIBLE,
+    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, MSG, PM_REMOVE,
+    PeekMessageW, RegisterClassExW, TranslateMessage, WM_DESTROY, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP, WS_VISIBLE,
 };
 use windows::core::{Interface, w};
 use windows_future::AsyncStatus;
@@ -29,12 +26,7 @@ pub enum Error {
 ///
 /// Safety: Called by the system with a valid `HWND` and message parameters.
 /// Forwards unhandled messages to `DefWindowProcW`.
-unsafe extern "system" fn wnd_proc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
+unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_DESTROY => LRESULT(0),
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
@@ -87,8 +79,10 @@ impl GraphicsCapturePicker {
     ///
     /// - `Ok(Some(PickedGraphicsCaptureItem))` if the user selects a target
     /// - `Ok(None)` if the picker completes without a result
-    /// - `Err(Error::Canceled)` if the user cancels the picker
-    /// - `Err(Error::WindowsError(_))` for underlying Windows API failures
+    ///
+    /// # Errors
+    /// - [`Error::Canceled`] when the user cancels the picker
+    /// - [`Error::WindowsError`] for underlying Windows API failures
     pub fn pick_item() -> Result<Option<PickedGraphicsCaptureItem>, Error> {
         let hinst = unsafe { GetModuleHandleW(None) }?;
         let wc = WNDCLASSEXW {
@@ -147,17 +141,14 @@ impl GraphicsCapturePicker {
             }
         }
 
-        op.GetResults().ok().map_or_else(
-            || Ok(None),
-            |item| Ok(Some(PickedGraphicsCaptureItem { item, _guard: HwndGuard(hwnd) })),
-        )
+        op.GetResults()
+            .ok()
+            .map_or_else(|| Ok(None), |item| Ok(Some(PickedGraphicsCaptureItem { item, _guard: HwndGuard(hwnd) })))
     }
 }
 
 impl TryIntoCaptureItemWithDetails for PickedGraphicsCaptureItem {
-    fn try_into_capture_item_with_details(
-        self,
-    ) -> Result<GraphicsCaptureItemWithDetails, windows::core::Error> {
+    fn try_into_capture_item_with_details(self) -> Result<GraphicsCaptureItemWithDetails, windows::core::Error> {
         Ok(GraphicsCaptureItemWithDetails::Unknown((self.item, self._guard)))
     }
 }

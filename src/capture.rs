@@ -14,8 +14,7 @@ use windows::Win32::System::WinRT::{
     RO_INIT_MULTITHREADED, RoInitialize,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, MSG, PostQuitMessage, PostThreadMessageW, TranslateMessage,
-    WM_QUIT,
+    DispatchMessageW, GetMessageW, MSG, PostQuitMessage, PostThreadMessageW, TranslateMessage, WM_QUIT,
 };
 use windows::core::Result as WindowsResult;
 use windows_future::AsyncActionCompletedHandler;
@@ -26,15 +25,34 @@ use crate::graphics_capture_api::{self, GraphicsCaptureApi, InternalCaptureContr
 use crate::settings::{Settings, TryIntoCaptureItemWithDetails};
 
 #[derive(thiserror::Error, Debug)]
+/// Errors that can occur while controlling a running capture session via [`CaptureControl`].
+///
+/// This error wraps lower-level errors from the Windows Graphics Capture pipeline, as well as
+/// thread-control failures when starting/stopping the background capture thread.
 pub enum CaptureControlError<E> {
+    /// Joining the background capture thread failed (panic or OS-level join error).
+    ///
+    /// Returned by [`CaptureControl::wait`] and [`CaptureControl::stop`] if the internal thread
+    /// panicked or could not be joined.
     #[error("Failed to join thread")]
     FailedToJoinThread,
+    /// The [`std::thread::JoinHandle`] was already taken out of the struct (for example by calling
+    /// [`CaptureControl::into_thread_handle`]) so the operation cannot proceed.
     #[error("Thread handle is taken out of the struct")]
     ThreadHandleIsTaken,
+    /// Failed to post a WM_QUIT message to the capture thread to request shutdown.
+    ///
+    /// This can happen if the thread is no longer alive or Windows refuses the message.
     #[error("Failed to post thread message")]
     FailedToPostThreadMessage,
+    /// The user-provided handler returned an error after capture stopped.
+    ///
+    /// This variant carries the handler's error type.
     #[error("Stopped handler error: {0}")]
     StoppedHandlerError(E),
+    /// A lower-level error from the graphics capture pipeline.
+    ///
+    /// Wraps [`GraphicsCaptureApiError`].
     #[error("Windows capture error: {0}")]
     GraphicsCaptureApiError(#[from] GraphicsCaptureApiError<E>),
 }
@@ -47,20 +65,9 @@ pub struct CaptureControl<T: GraphicsCaptureApiHandler + Send + 'static, E> {
 }
 
 impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
-    /// Creates a new `CaptureControl` struct.
-    ///
-    /// # Arguments
-    ///
-    /// * `thread_handle` - The join handle for the capture thread.
-    /// * `halt_handle` - The atomic boolean used to pause the capture thread.
-    /// * `callback` - The mutex-protected callback struct used to call struct
-    ///   methods directly.
-    ///
-    /// # Returns
-    ///
-    /// The newly created `CaptureControl` struct.
-    #[must_use]
+    /// Constructs a new [`CaptureControl`].
     #[inline]
+    #[must_use]
     pub const fn new(
         thread_handle: JoinHandle<Result<(), GraphicsCaptureApiError<E>>>,
         halt_handle: Arc<AtomicBool>,
@@ -70,54 +77,40 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
     }
 
     /// Checks whether the capture thread has finished.
-    ///
-    /// # Returns
-    ///
-    /// `true` if the capture thread is finished, `false` otherwise.
-    #[must_use]
     #[inline]
+    #[must_use]
     pub fn is_finished(&self) -> bool {
         self.thread_handle.as_ref().is_none_or(std::thread::JoinHandle::is_finished)
     }
 
     /// Gets the join handle for the capture thread.
-    ///
-    /// # Returns
-    ///
-    /// The join handle for the capture thread.
-    #[must_use]
     #[inline]
+    #[must_use]
     pub fn into_thread_handle(self) -> JoinHandle<Result<(), GraphicsCaptureApiError<E>>> {
         self.thread_handle.unwrap()
     }
 
     /// Gets the halt handle used to pause the capture thread.
-    ///
-    /// # Returns
-    ///
-    /// The halt handle used to pause the capture thread.
-    #[must_use]
     #[inline]
+    #[must_use]
     pub fn halt_handle(&self) -> Arc<AtomicBool> {
         self.halt_handle.clone()
     }
 
     /// Gets the callback struct used to call struct methods directly.
-    ///
-    /// # Returns
-    ///
-    /// The callback struct used to call struct methods directly.
-    #[must_use]
     #[inline]
+    #[must_use]
     pub fn callback(&self) -> Arc<Mutex<T>> {
         self.callback.clone()
     }
 
     /// Waits for the capture thread to stop.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// `Ok(())` if the capturing thread stops successfully, an error otherwise.
+    /// - [`CaptureControlError::FailedToJoinThread`] when joining the internal thread fails
+    /// - [`CaptureControlError::ThreadHandleIsTaken`] when the thread handle was previously taken
+    ///   via [`CaptureControl::into_thread_handle`]
     #[inline]
     pub fn wait(mut self) -> Result<(), CaptureControlError<E>> {
         if let Some(thread_handle) = self.thread_handle.take() {
@@ -134,11 +127,17 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
         Ok(())
     }
 
-    /// Gracefully stops the capture thread.
+    /// Gracefully requests the capture thread to stop and waits for it to finish.
     ///
-    /// # Returns
+    /// This posts a WM_QUIT to the capture thread and joins it.
     ///
-    /// `Ok(())` if the capture thread stops successfully, an error otherwise.
+    /// # Errors
+    ///
+    /// - [`CaptureControlError::FailedToPostThreadMessage`] when posting WM_QUIT to the thread
+    ///   fails and the thread is still running
+    /// - [`CaptureControlError::FailedToJoinThread`] when joining the internal thread fails
+    /// - [`CaptureControlError::ThreadHandleIsTaken`] when the thread handle was previously taken
+    ///   via [`CaptureControl::into_thread_handle`]
     #[inline]
     pub fn stop(mut self) -> Result<(), CaptureControlError<E>> {
         self.halt_handle.store(true, atomic::Ordering::Relaxed);
@@ -149,9 +148,7 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
             let thread_id = unsafe { GetThreadId(handle) };
 
             loop {
-                match unsafe {
-                    PostThreadMessageW(thread_id, WM_QUIT, WPARAM::default(), LPARAM::default())
-                } {
+                match unsafe { PostThreadMessageW(thread_id, WM_QUIT, WPARAM::default(), LPARAM::default()) } {
                     Ok(()) => break,
                     Err(e) => {
                         if thread_handle.is_finished() {
@@ -180,25 +177,49 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
 }
 
 #[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
+/// Errors that can occur while initializing and running the Windows Graphics Capture pipeline.
 pub enum GraphicsCaptureApiError<E> {
+    /// Joining the worker thread failed (panic or OS-level join error).
     #[error("Failed to join thread")]
     FailedToJoinThread,
+    /// Failed to initialize the Windows Runtime for multithreaded apartment.
+    ///
+    /// Occurs when `RoInitialize(RO_INIT_MULTITHREADED)` returns an error other than `S_FALSE`.
     #[error("Failed to initialize WinRT")]
     FailedToInitWinRT,
+    /// Creating the dispatcher queue controller for the message loop failed.
     #[error("Failed to create dispatcher queue controller")]
     FailedToCreateDispatcherQueueController,
+    /// Shutting down the dispatcher queue failed.
     #[error("Failed to shut down dispatcher queue")]
     FailedToShutdownDispatcherQueue,
+    /// Registering the dispatcher queue completion handler failed.
     #[error("Failed to set dispatcher queue completed handler")]
     FailedToSetDispatcherQueueCompletedHandler,
+    /// The provided item could not be converted into a `GraphicsCaptureItem`.
+    ///
+    /// This happens when
+    /// [`crate::settings::TryIntoCaptureItemWithDetails::try_into_capture_item_with_details`]
+    /// fails for the item passed in [`crate::settings::Settings`].
     #[error("Failed to convert item to `GraphicsCaptureItem`")]
     ItemConvertFailed,
+    /// Underlying Direct3D (D3D11) error.
+    ///
+    /// Wraps [`crate::d3d11::Error`].
     #[error("DirectX error: {0}")]
     DirectXError(#[from] d3d11::Error),
+    /// Error produced by the Windows Graphics Capture API wrapper.
+    ///
+    /// Wraps [`crate::graphics_capture_api::Error`].
     #[error("Graphics capture error: {0}")]
     GraphicsCaptureApiError(graphics_capture_api::Error),
+    /// Error returned by the user handler when constructing it via
+    /// [`GraphicsCaptureApiHandler::new`].
     #[error("New handler error: {0}")]
     NewHandlerError(E),
+    /// Error returned by the user handler during frame processing via
+    /// [`GraphicsCaptureApiHandler::on_frame_arrived`] or from
+    /// [`GraphicsCaptureApiHandler::on_closed`].
     #[error("Frame handler error: {0}")]
     FrameHandlerError(E),
 }
@@ -218,18 +239,11 @@ pub trait GraphicsCaptureApiHandler: Sized {
     /// The type of flags used to get the values from the settings.
     type Flags;
 
-    /// The type of error that can occur during capture. The error will be returned from the `CaptureControl` and `start` functions.
+    /// The type of error that can occur during capture. The error will be returned from the
+    /// [`CaptureControl`] and [`GraphicsCaptureApiHandler::start`] functions.
     type Error: Send + Sync;
 
     /// Starts the capture and takes control of the current thread.
-    ///
-    /// # Arguments
-    ///
-    /// * `settings` - The capture settings.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the capture was successful; otherwise, it returns an error of type `GraphicsCaptureApiError`.
     #[inline]
     fn start<T: TryIntoCaptureItemWithDetails>(
         settings: Settings<Self::Flags, T>,
@@ -277,14 +291,10 @@ pub trait GraphicsCaptureApiHandler: Sized {
         // Start capture
         let result = Arc::new(Mutex::new(None));
 
-        let ctx = Context {
-            flags: settings.flags,
-            device: d3d_device.clone(),
-            device_context: d3d_device_context.clone(),
-        };
+        let ctx =
+            Context { flags: settings.flags, device: d3d_device.clone(), device_context: d3d_device_context.clone() };
 
-        let callback =
-            Arc::new(Mutex::new(Self::new(ctx).map_err(GraphicsCaptureApiError::NewHandlerError)?));
+        let callback = Arc::new(Mutex::new(Self::new(ctx).map_err(GraphicsCaptureApiError::NewHandlerError)?));
 
         let mut capture = GraphicsCaptureApi::new(
             d3d_device,
@@ -316,9 +326,8 @@ pub trait GraphicsCaptureApiHandler: Sized {
         }
 
         // Shut down dispatcher queue
-        let async_action = controller
-            .ShutdownQueueAsync()
-            .map_err(|_| GraphicsCaptureApiError::FailedToShutdownDispatcherQueue)?;
+        let async_action =
+            controller.ShutdownQueueAsync().map_err(|_| GraphicsCaptureApiError::FailedToShutdownDispatcherQueue)?;
 
         async_action
             .SetCompleted(&AsyncActionCompletedHandler::new(move |_, _| -> WindowsResult<()> {
@@ -352,14 +361,6 @@ pub trait GraphicsCaptureApiHandler: Sized {
     }
 
     /// Starts the capture without taking control of the current thread.
-    ///
-    /// # Arguments
-    ///
-    /// * `settings` - The capture settings.
-    ///
-    /// # Returns
-    ///
-    /// Returns a `Result` containing the `CaptureControl` if the capture was successful; otherwise, it returns an error of type `GraphicsCaptureApiError`.
     #[inline]
     fn start_free_threaded<T: TryIntoCaptureItemWithDetails + Send + 'static>(
         settings: Settings<Self::Flags, T>,
@@ -371,136 +372,126 @@ pub trait GraphicsCaptureApiHandler: Sized {
         let (halt_sender, halt_receiver) = mpsc::channel::<Arc<AtomicBool>>();
         let (callback_sender, callback_receiver) = mpsc::channel::<Arc<Mutex<Self>>>();
 
-        let thread_handle =
-            thread::spawn(move || -> Result<(), GraphicsCaptureApiError<Self::Error>> {
-                // Initialize WinRT
-                static INIT_MTA: OnceLock<()> = OnceLock::new();
-                INIT_MTA.get_or_init(|| {
-                    unsafe {
-                        CoIncrementMTAUsage().expect("Failed to increment MTA usage");
-                    };
-                });
-
-                match unsafe { RoInitialize(RO_INIT_MULTITHREADED) } {
-                    Ok(_) => (),
-                    Err(e) => {
-                        if e.code() == S_FALSE {
-                            // Already initialized
-                        } else {
-                            return Err(GraphicsCaptureApiError::FailedToInitWinRT);
-                        }
-                    }
-                }
-
-                // Create a dispatcher queue for the current thread
-                let options = DispatcherQueueOptions {
-                    dwSize: u32::try_from(mem::size_of::<DispatcherQueueOptions>()).unwrap(),
-                    threadType: DQTYPE_THREAD_CURRENT,
-                    apartmentType: DQTAT_COM_NONE,
-                };
-                let controller = unsafe {
-                    CreateDispatcherQueueController(options).map_err(|_| {
-                        GraphicsCaptureApiError::FailedToCreateDispatcherQueueController
-                    })?
-                };
-
-                // Get current thread ID
-                let thread_id = unsafe { GetCurrentThreadId() };
-
-                // Create direct3d device and context
-                let (d3d_device, d3d_device_context) = create_d3d_device()?;
-
-                // Start capture
-                let result = Arc::new(Mutex::new(None));
-
-                let ctx = Context {
-                    flags: settings.flags,
-                    device: d3d_device.clone(),
-                    device_context: d3d_device_context.clone(),
-                };
-
-                let callback = Arc::new(Mutex::new(
-                    Self::new(ctx).map_err(GraphicsCaptureApiError::NewHandlerError)?,
-                ));
-
-                let mut capture = GraphicsCaptureApi::new(
-                    d3d_device,
-                    d3d_device_context,
-                    settings
-                        .item
-                        .try_into_capture_item_with_details()
-                        .map_err(|_| GraphicsCaptureApiError::ItemConvertFailed)?,
-                    callback.clone(),
-                    settings.cursor_capture_settings,
-                    settings.draw_border_settings,
-                    settings.secondary_window_settings,
-                    settings.minimum_update_interval_settings,
-                    settings.dirty_region_settings,
-                    settings.color_format,
-                    thread_id,
-                    result.clone(),
-                )
-                .map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?;
-
-                capture
-                    .start_capture()
-                    .map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?;
-
-                // Send halt handle
-                let halt_handle = capture.halt_handle();
-                halt_sender.send(halt_handle).unwrap();
-
-                // Send callback
-                callback_sender.send(callback).unwrap();
-
-                // Message loop
-                let mut message = MSG::default();
+        let thread_handle = thread::spawn(move || -> Result<(), GraphicsCaptureApiError<Self::Error>> {
+            // Initialize WinRT
+            static INIT_MTA: OnceLock<()> = OnceLock::new();
+            INIT_MTA.get_or_init(|| {
                 unsafe {
-                    while GetMessageW(&mut message, None, 0, 0).as_bool() {
-                        let _ = TranslateMessage(&message);
-                        DispatchMessageW(&message);
-                    }
-                }
-
-                // Shutdown dispatcher queue
-                let async_action = controller
-                    .ShutdownQueueAsync()
-                    .map_err(|_| GraphicsCaptureApiError::FailedToShutdownDispatcherQueue)?;
-
-                async_action
-                    .SetCompleted(&AsyncActionCompletedHandler::new(
-                        move |_, _| -> Result<(), windows::core::Error> {
-                            unsafe { PostQuitMessage(0) };
-                            Ok(())
-                        },
-                    ))
-                    .map_err(|_| {
-                        GraphicsCaptureApiError::FailedToSetDispatcherQueueCompletedHandler
-                    })?;
-
-                // Final message loop
-                let mut message = MSG::default();
-                unsafe {
-                    while GetMessageW(&mut message, None, 0, 0).as_bool() {
-                        let _ = TranslateMessage(&message);
-                        DispatchMessageW(&message);
-                    }
-                }
-
-                // Stop capture
-                capture.stop_capture();
-
-                // Uninitialize WinRT
-                // unsafe { RoUninitialize() }; // Not sure if this is needed here
-
-                // Check handler result
-                let result = result.lock().take();
-                if let Some(e) = result {
-                    return Err(GraphicsCaptureApiError::FrameHandlerError(e));
-                }
-
-                Ok(())
+                    CoIncrementMTAUsage().expect("Failed to increment MTA usage");
+                };
             });
+
+            match unsafe { RoInitialize(RO_INIT_MULTITHREADED) } {
+                Ok(_) => (),
+                Err(e) => {
+                    if e.code() == S_FALSE {
+                        // Already initialized
+                    } else {
+                        return Err(GraphicsCaptureApiError::FailedToInitWinRT);
+                    }
+                }
+            }
+
+            // Create a dispatcher queue for the current thread
+            let options = DispatcherQueueOptions {
+                dwSize: u32::try_from(mem::size_of::<DispatcherQueueOptions>()).unwrap(),
+                threadType: DQTYPE_THREAD_CURRENT,
+                apartmentType: DQTAT_COM_NONE,
+            };
+            let controller = unsafe {
+                CreateDispatcherQueueController(options)
+                    .map_err(|_| GraphicsCaptureApiError::FailedToCreateDispatcherQueueController)?
+            };
+
+            // Get current thread ID
+            let thread_id = unsafe { GetCurrentThreadId() };
+
+            // Create direct3d device and context
+            let (d3d_device, d3d_device_context) = create_d3d_device()?;
+
+            // Start capture
+            let result = Arc::new(Mutex::new(None));
+
+            let ctx = Context {
+                flags: settings.flags,
+                device: d3d_device.clone(),
+                device_context: d3d_device_context.clone(),
+            };
+
+            let callback = Arc::new(Mutex::new(Self::new(ctx).map_err(GraphicsCaptureApiError::NewHandlerError)?));
+
+            let mut capture = GraphicsCaptureApi::new(
+                d3d_device,
+                d3d_device_context,
+                settings
+                    .item
+                    .try_into_capture_item_with_details()
+                    .map_err(|_| GraphicsCaptureApiError::ItemConvertFailed)?,
+                callback.clone(),
+                settings.cursor_capture_settings,
+                settings.draw_border_settings,
+                settings.secondary_window_settings,
+                settings.minimum_update_interval_settings,
+                settings.dirty_region_settings,
+                settings.color_format,
+                thread_id,
+                result.clone(),
+            )
+            .map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?;
+
+            capture.start_capture().map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?;
+
+            // Send halt handle
+            let halt_handle = capture.halt_handle();
+            halt_sender.send(halt_handle).unwrap();
+
+            // Send callback
+            callback_sender.send(callback).unwrap();
+
+            // Message loop
+            let mut message = MSG::default();
+            unsafe {
+                while GetMessageW(&mut message, None, 0, 0).as_bool() {
+                    let _ = TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
+            }
+
+            // Shutdown dispatcher queue
+            let async_action = controller
+                .ShutdownQueueAsync()
+                .map_err(|_| GraphicsCaptureApiError::FailedToShutdownDispatcherQueue)?;
+
+            async_action
+                .SetCompleted(&AsyncActionCompletedHandler::new(move |_, _| -> Result<(), windows::core::Error> {
+                    unsafe { PostQuitMessage(0) };
+                    Ok(())
+                }))
+                .map_err(|_| GraphicsCaptureApiError::FailedToSetDispatcherQueueCompletedHandler)?;
+
+            // Final message loop
+            let mut message = MSG::default();
+            unsafe {
+                while GetMessageW(&mut message, None, 0, 0).as_bool() {
+                    let _ = TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
+            }
+
+            // Stop capture
+            capture.stop_capture();
+
+            // Uninitialize WinRT
+            // unsafe { RoUninitialize() }; // Not sure if this is needed here
+
+            // Check handler result
+            let result = result.lock().take();
+            if let Some(e) = result {
+                return Err(GraphicsCaptureApiError::FrameHandlerError(e));
+            }
+
+            Ok(())
+        });
 
         let Ok(halt_handle) = halt_receiver.recv() else {
             match thread_handle.join() {
@@ -525,26 +516,9 @@ pub trait GraphicsCaptureApiHandler: Sized {
 
     /// Function that will be called to create the struct. The flags can be
     /// passed from settings.
-    ///
-    /// # Arguments
-    ///
-    /// * `flags` - The flags used to create the struct.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(Self)` if the struct creation was successful; otherwise, it returns an error of type `Self::Error`.
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error>;
 
     /// Called every time a new frame is available.
-    ///
-    /// # Arguments
-    ///
-    /// * `frame` - A mutable reference to the captured frame.
-    /// * `capture_control` - The internal capture control.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the frame processing was successful; otherwise, it returns an error of type `Self::Error`.
     fn on_frame_arrived(
         &mut self,
         frame: &mut Frame,
@@ -552,10 +526,6 @@ pub trait GraphicsCaptureApiHandler: Sized {
     ) -> Result<(), Self::Error>;
 
     /// Optional handler called when the capture item (usually a window) closes.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the handler executed successfully; otherwise, it returns an error of type `Self::Error`.
     #[inline]
     fn on_closed(&mut self) -> Result<(), Self::Error> {
         Ok(())

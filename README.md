@@ -9,9 +9,14 @@
 [Sponsors]: https://img.shields.io/github/sponsors/NiiightmareXD
 [Sponsors URL]: https://github.com/sponsors/NiiightmareXD
 
+## 🎉 Windows Capture 2.0.0 is here! 🚀
+
+- 🎬 Enhanced video encoder: hardware-accelerated with improved stability and monotonic audio timing
+- 🖥️ New support for the DXGI Desktop Duplication API
+
 **Windows Capture** is a highly efficient Rust and Python library that enables you to capture the screen using the Graphics Capture API effortlessly. This library allows you to easily capture the screen of your Windows-based computer and use it for various purposes, such as creating instructional videos, taking screenshots, or recording your gameplay. With its intuitive interface and robust functionality, Windows Capture is an excellent choice for anyone looking for a reliable, easy-to-use screen-capturing solution.
 
-**Note** this README.md is for [Rust library](https://github.com/NiiightmareXD/windows-capture) Python library can be found [here](https://github.com/NiiightmareXD/windows-capture/tree/main/windows-capture-python)
+Note: This README is for the Rust library. The Python library can be found here: https://github.com/NiiightmareXD/windows-capture/tree/main/windows-capture-python
 
 # Recall.ai - API for desktop recording
 
@@ -22,7 +27,9 @@ If you’re looking for a hosted desktop recording API, consider checking out [R
 - Updates frames only when required
 - High performance
 - Easy to use
-- Uses the latest screen capture API
+- Uses the latest Windows Graphics Capture API
+- Supports the DXGI Desktop Duplication API
+- Enhanced, hardware-accelerated video encoder with stable audio timing
 
 ## Installation
 
@@ -30,7 +37,7 @@ Add this dependency to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-windows-capture = "1.6.0-alpha.1"
+windows-capture = "2.0.0-alpha.1"
 ```
 
 Or run this command:
@@ -161,6 +168,31 @@ fn main() {
     // Starts the capture and takes control of the current thread.
     // The errors from the handler trait will end up here.
     Capture::start(settings).expect("Screen capture failed");
+}
+```
+
+## DXGI Desktop Duplication example
+
+```rust
+use windows_capture::dxgi_duplication_api::DxgiDuplicationApi;
+use windows_capture::frame::ImageFormat;
+use windows_capture::monitor::Monitor;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Select a monitor (primary in this example)
+    let monitor = Monitor::primary()?;
+
+    // Create a duplication session for this monitor
+    let mut dup = DxgiDuplicationApi::new(monitor)?;
+
+    // Try to grab one frame within ~33ms (about 30 FPS budget)
+    let mut frame = dup.acquire_next_frame(33)?;
+
+    // Map the GPU image into CPU memory and save a PNG
+    let mut buffer = frame.buffer()?;
+    buffer.save_as_image("dxgi_screenshot.png", ImageFormat::Png)?;
+
+    Ok(())
 }
 ```
 

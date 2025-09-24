@@ -5,16 +5,13 @@ use std::time::{Duration, Instant};
 
 use clap::Parser;
 use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
-use windows_capture::encoder::{
-    AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder,
-};
+use windows_capture::encoder::{AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
 use windows_capture::monitor::Monitor;
 use windows_capture::settings::{
-    ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
-    MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
-    TryIntoCaptureItemWithDetails,
+    ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings, MinimumUpdateIntervalSettings,
+    SecondaryWindowSettings, Settings, TryIntoCaptureItemWithDetails,
 };
 use windows_capture::window::Window;
 
@@ -154,7 +151,8 @@ struct Cli {
     #[arg(long, default_value = "default")]
     cursor_capture: String,
 
-    /// Specifies whether to draw a border around the captured item. Options: [always, never, default]
+    /// Specifies whether to draw a border around the captured item. Options: [always, never,
+    /// default]
     #[arg(long, default_value = "default")]
     draw_border: String,
 
@@ -190,10 +188,7 @@ fn parse_cursor_capture(s: &str) -> CursorCaptureSettings {
         "never" => CursorCaptureSettings::WithoutCursor,
         "default" => CursorCaptureSettings::Default,
         _ => {
-            eprintln!(
-                "Invalid cursor_capture value: '{}'. Use 'always', 'never', or 'default'.",
-                s
-            );
+            eprintln!("Invalid cursor_capture value: '{}'. Use 'always', 'never', or 'default'.", s);
             std::process::exit(1);
         }
     }
@@ -219,10 +214,7 @@ fn parse_secondary_window(s: &str) -> SecondaryWindowSettings {
         "exclude" => SecondaryWindowSettings::Exclude,
         "default" => SecondaryWindowSettings::Default,
         _ => {
-            eprintln!(
-                "Invalid secondary_window value: '{}'. Use 'include', 'exclude', or 'default'.",
-                s
-            );
+            eprintln!("Invalid secondary_window value: '{}'. Use 'include', 'exclude', or 'default'.", s);
             std::process::exit(1);
         }
     }
@@ -231,9 +223,7 @@ fn parse_secondary_window(s: &str) -> SecondaryWindowSettings {
 /// Parses the string argument for minimum update interval settings.
 fn parse_minimum_update_interval(m: &Option<u64>) -> MinimumUpdateIntervalSettings {
     match m {
-        Some(value) if *value > 0 => {
-            MinimumUpdateIntervalSettings::Custom(Duration::from_millis(*value))
-        }
+        Some(value) if *value > 0 => MinimumUpdateIntervalSettings::Custom(Duration::from_millis(*value)),
         None | Some(0) => MinimumUpdateIntervalSettings::Default,
         _ => {
             eprintln!(
@@ -252,10 +242,7 @@ fn parse_dirty_region(s: &str) -> DirtyRegionSettings {
         "report_only" => DirtyRegionSettings::ReportOnly,
         "report_and_render" => DirtyRegionSettings::ReportAndRender,
         _ => {
-            eprintln!(
-                "Invalid dirty_region value: '{}'. Use 'default', 'report_only', or 'report_and_render'.",
-                s
-            );
+            eprintln!("Invalid dirty_region value: '{}'. Use 'default', 'report_only', or 'report_and_render'.", s);
             std::process::exit(1);
         }
     }
@@ -332,10 +319,7 @@ fn main() {
             frame_rate: cli.frame_rate,
         };
 
-        println!(
-            "Capturing window: \"{}\"",
-            capture_item.title().expect("Failed to get window title")
-        );
+        println!("Capturing window: \"{}\"", capture_item.title().expect("Failed to get window title"));
         println!("Window dimensions: {}x{}", width, height);
 
         start_capture(

@@ -2,15 +2,13 @@ use std::io::{self, Write};
 use std::time::Instant;
 
 use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
-use windows_capture::encoder::{
-    AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder,
-};
+use windows_capture::encoder::{AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
 use windows_capture::graphics_capture_picker::GraphicsCapturePicker;
 use windows_capture::settings::{
-    ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
-    MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
+    ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings, MinimumUpdateIntervalSettings,
+    SecondaryWindowSettings, Settings,
 };
 
 // Handles capture events.
@@ -22,7 +20,8 @@ struct Capture {
 }
 
 impl GraphicsCaptureApiHandler for Capture {
-    // The type of flags used to get the values from the settings, here they are the width and height.
+    // The type of flags used to get the values from the settings, here they are the width and
+    // height.
     type Flags = (i32, i32);
 
     // The type of error that can be returned from `CaptureControl` and `start`
@@ -32,8 +31,9 @@ impl GraphicsCaptureApiHandler for Capture {
     // Function that will be called to create a new instance. The flags can be
     // passed from settings.
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
-        // If we didn't want to get the size from the settings, we could use frame.width() and frame.height()
-        // in the on_frame_arrived function, but we would need to create the encoder there.
+        // If we didn't want to get the size from the settings, we could use frame.width() and
+        // frame.height() in the on_frame_arrived function, but we would need to create the
+        // encoder there.
         let encoder = VideoEncoder::new(
             VideoSettingsBuilder::new(ctx.flags.0 as u32, ctx.flags.1 as u32),
             AudioSettingsBuilder::default().disabled(true),
@@ -83,7 +83,8 @@ impl GraphicsCaptureApiHandler for Capture {
 }
 
 fn main() {
-    // Opens a dialog to pick a window or screen to capture; refer to the docs for other capture items.
+    // Opens a dialog to pick a window or screen to capture; refer to the docs for other capture
+    // items.
     let item = GraphicsCapturePicker::pick_item().expect("Failed to pick item");
 
     // If the user canceled the selection, exit.
@@ -104,13 +105,15 @@ fn main() {
         DrawBorderSettings::Default,
         // Secondary window settings, if you want to include secondary windows in the capture
         SecondaryWindowSettings::Default,
-        // Minimum update interval, if you want to change the frame rate limit (default is 60 FPS or 16.67 ms)
+        // Minimum update interval, if you want to change the frame rate limit (default is 60 FPS
+        // or 16.67 ms)
         MinimumUpdateIntervalSettings::Default,
         // Dirty region settings
         DirtyRegionSettings::Default,
         // The desired color format for the captured frame.
         ColorFormat::Rgba8,
-        // Additional flags for the capture settings that will be passed to the user-defined `new` function.
+        // Additional flags for the capture settings that will be passed to the user-defined `new`
+        // function.
         size,
     );
 

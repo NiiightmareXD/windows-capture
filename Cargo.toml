@@ -1,6 +1,6 @@
 [package]
 name = "windows-capture"
-version = "1.6.0-alpha.1"
+version = "2.0.0-alpha.1"
 authors = ["NiiightmareXD"]
 edition = "2024"
 description = "Fastest Windows Screen Capture Library For Rust 🔥"
@@ -71,7 +71,11 @@ default-target = "x86_64-pc-windows-msvc"
 targets = ["x86_64-pc-windows-msvc"]
 
 [[example]]
-name = "basic"
+name = "graphics_capture"
+doc-scrape-examples = false
+
+[[example]]
+name = "dxgi_duplication"
 doc-scrape-examples = false
 
 [[example]]

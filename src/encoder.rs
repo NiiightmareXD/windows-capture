@@ -5,18 +5,17 @@ use std::sync::{Arc, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use parking_lot::Mutex; // Only used to serialize recv() per stream.
+use parking_lot::Mutex;
 use windows::Foundation::{TimeSpan, TypedEventHandler};
 use windows::Graphics::DirectX::Direct3D11::IDirect3DSurface;
 use windows::Graphics::Imaging::{BitmapAlphaMode, BitmapEncoder, BitmapPixelFormat};
 use windows::Media::Core::{
-    AudioStreamDescriptor, MediaStreamSample, MediaStreamSource,
-    MediaStreamSourceSampleRequestedEventArgs, MediaStreamSourceStartingEventArgs,
-    VideoStreamDescriptor,
+    AudioStreamDescriptor, MediaStreamSample, MediaStreamSource, MediaStreamSourceSampleRequestedEventArgs,
+    MediaStreamSourceStartingEventArgs, VideoStreamDescriptor,
 };
 use windows::Media::MediaProperties::{
-    AudioEncodingProperties, ContainerEncodingProperties, MediaEncodingProfile,
-    MediaEncodingSubtypes, VideoEncodingProperties,
+    AudioEncodingProperties, ContainerEncodingProperties, MediaEncodingProfile, MediaEncodingSubtypes,
+    VideoEncodingProperties,
 };
 use windows::Media::Transcoding::MediaTranscoder;
 use windows::Security::Cryptography::CryptographicBuffer;
@@ -25,6 +24,13 @@ use windows::Storage::Streams::{
 };
 use windows::Storage::{FileAccessMode, StorageFile};
 use windows::System::Threading::{ThreadPool, WorkItemHandler, WorkItemOptions, WorkItemPriority};
+use windows::Win32::Graphics::Direct3D11::{
+    D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_BOX, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
+    ID3D11Device, ID3D11RenderTargetView, ID3D11Texture2D,
+};
+use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT, DXGI_SAMPLE_DESC};
+use windows::Win32::Graphics::Dxgi::IDXGISurface;
+use windows::Win32::System::WinRT::Direct3D11::CreateDirect3D11SurfaceFromDXGISurface;
 use windows::core::{HSTRING, Interface};
 
 use crate::d3d11::SendDirectX;
@@ -35,35 +41,80 @@ type VideoFrameReceiver = Arc<Mutex<mpsc::Receiver<Option<(VideoEncoderSource, T
 type AudioFrameReceiver = Arc<Mutex<mpsc::Receiver<Option<(AudioEncoderSource, TimeSpan)>>>>;
 
 #[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
+/// Errors that can occur when encoding raw buffers to images via [`ImageEncoder`].
 pub enum ImageEncoderError {
+    /// The provided source pixel format is not supported for image encoding.
+    ///
+    /// This occurs for formats such as [`crate::settings::ColorFormat::Rgba16F`].
     #[error("This color format is not supported for saving as an image")]
     UnsupportedFormat,
+    /// A Windows Runtime/Win32 API call failed.
+    ///
+    /// Wraps [`windows::core::Error`].
     #[error("Windows API error: {0}")]
     WindowsError(#[from] windows::core::Error),
+    /// An integer conversion failed during buffer sizing or Windows API calls.
+    ///
+    /// Wraps [`std::num::TryFromIntError`].
     #[error("Integer conversion error: {0}")]
     IntConversionError(#[from] std::num::TryFromIntError),
 }
 
-/// Encodes image buffers into image bytes with a specified image format and color format.
+/// Encodes raw image buffers into encoded bytes for common formats.
+///
+/// Supports saving as PNG, JPEG, GIF, TIFF, BMP, and JPEG XR when the input
+/// color format is compatible.
+///
+/// # Example
+/// ```no_run
+/// use windows_capture::encoder::ImageEncoder;
+/// use windows_capture::frame::ImageFormat;
+/// use windows_capture::settings::ColorFormat;
+///
+/// let width = 320u32;
+/// let height = 240u32;
+/// // BGRA8 buffer (e.g., from a frame)
+/// let bgra = vec![0u8; (width * height * 4) as usize];
+///
+/// let png_bytes = ImageEncoder::new(ImageFormat::Png, ColorFormat::Bgra8)
+///     .encode(&bgra, width, height)
+///     .unwrap();
+///
+/// std::fs::write("example.png", png_bytes).unwrap();
+/// ```
 pub struct ImageEncoder {
     format: ImageFormat,
     color_format: ColorFormat,
 }
 
 impl ImageEncoder {
-    #[must_use]
+    /// Constructs a new [`ImageEncoder`].
+    ///
+    /// - `format`: Target output [`ImageFormat`].
+    /// - `color_format`: Source pixel [`crate::settings::ColorFormat`].
+    ///
+    /// This constructor does not validate compatibility; validation happens in
+    /// [`ImageEncoder::encode`].
     #[inline]
+    #[must_use]
     pub const fn new(format: ImageFormat, color_format: ColorFormat) -> Self {
         Self { format, color_format }
     }
 
+    /// Encodes the provided pixel buffer into the configured output [`ImageFormat`].
+    ///
+    /// The input buffer must match the specified source [`crate::settings::ColorFormat`]
+    /// and dimensions. For packed 8-bit formats (e.g., [`crate::settings::ColorFormat::Bgra8`]),
+    /// the buffer length should be `width * height * 4`.
+    ///
+    /// # Errors
+    ///
+    /// - [`ImageEncoderError::UnsupportedFormat`] when the source format is unsupported for images
+    ///   (e.g., [`crate::settings::ColorFormat::Rgba16F`])
+    /// - [`ImageEncoderError::WindowsError`] when Windows Imaging API calls fail
+    /// - [`ImageEncoderError::IntConversionError`] on integer conversion failures
     #[inline]
-    pub fn encode(
-        &self,
-        image_buffer: &[u8],
-        width: u32,
-        height: u32,
-    ) -> Result<Vec<u8>, ImageEncoderError> {
+    pub fn encode(&self, image_buffer: &[u8], width: u32, height: u32) -> Result<Vec<u8>, ImageEncoderError> {
         let encoder = match self.format {
             ImageFormat::Jpeg => BitmapEncoder::JpegEncoderId()?,
             ImageFormat::Png => BitmapEncoder::PngEncoderId()?,
@@ -82,15 +133,7 @@ impl ImageEncoder {
             ColorFormat::Rgba16F => return Err(ImageEncoderError::UnsupportedFormat),
         };
 
-        encoder.SetPixelData(
-            pixelformat,
-            BitmapAlphaMode::Premultiplied,
-            width,
-            height,
-            1.0,
-            1.0,
-            image_buffer,
-        )?;
+        encoder.SetPixelData(pixelformat, BitmapAlphaMode::Premultiplied, width, height, 1.0, 1.0, image_buffer)?;
 
         encoder.FlushAsync()?.join()?;
 
@@ -107,35 +150,70 @@ impl ImageEncoder {
 }
 
 #[derive(thiserror::Error, Debug)]
+/// Errors emitted by [`VideoEncoder`] during configuration, streaming, or finalization.
 pub enum VideoEncoderError {
+    /// A Windows Runtime/Win32 API call failed.
+    ///
+    /// Wraps [`windows::core::Error`].
     #[error("Windows API error: {0}")]
     WindowsError(#[from] windows::core::Error),
+    /// Failed to send a video sample into the internal pipeline.
+    ///
+    /// Typically indicates the internal channel is closed.
     #[error("Failed to send frame: {0}")]
     FrameSendError(#[from] mpsc::SendError<Option<(VideoEncoderSource, TimeSpan)>>),
+    /// Failed to send an audio sample into the internal pipeline.
+    ///
+    /// Typically indicates the internal channel is closed.
     #[error("Failed to send audio: {0}")]
     AudioSendError(#[from] mpsc::SendError<Option<(AudioEncoderSource, TimeSpan)>>),
+    /// Video encoding was disabled via [`VideoSettingsBuilder::disabled`].
     #[error("Video encoding is disabled")]
     VideoDisabled,
+    /// Audio encoding was disabled via [`AudioSettingsBuilder::disabled`].
     #[error("Audio encoding is disabled")]
     AudioDisabled,
+    /// An I/O error occurred during file creation or writing.
+    ///
+    /// Wraps [`std::io::Error`].
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
+    /// The provided frame color format is unsupported by the encoder path.
+    ///
+    /// See [`crate::settings::ColorFormat`].
+    #[error("Unsupported frame color format: {0:?}")]
+    UnsupportedFrameFormat(ColorFormat),
 }
 
 unsafe impl Send for VideoEncoderError {}
 unsafe impl Sync for VideoEncoderError {}
 
-/// Video sources.
-/// - DirectX surfaces: COM-refcounted; holding the pointer is enough.
-/// - Buffer path now **owns** the bytes (Vec<u8>) so callers can return immediately.
+/// Video sources used by [`VideoEncoder`].
+///
+/// - For [`VideoEncoderSource::DirectX`], the COM surface pointer is ref-counted; holding the
+///   pointer is sufficient.
+/// - For [`VideoEncoderSource::Buffer`], the encoder takes ownership of the bytes, allowing callers
+///   to return immediately.
 pub enum VideoEncoderSource {
+    /// A Direct3D surface sample.
     DirectX(SendDirectX<IDirect3DSurface>),
+    /// A raw BGRA sample buffer.
     Buffer(Vec<u8>),
 }
 
-/// Audio sources that now **own** the bytes.
+/// Audio sources used by [`VideoEncoder`]. The encoder takes ownership of the bytes.
 pub enum AudioEncoderSource {
+    /// Interleaved PCM bytes.
     Buffer(Vec<u8>),
+}
+
+struct CachedSurface {
+    width: u32,
+    height: u32,
+    format: ColorFormat,
+    texture: SendDirectX<ID3D11Texture2D>,
+    surface: SendDirectX<IDirect3DSurface>,
+    render_target_view: Option<SendDirectX<ID3D11RenderTargetView>>,
 }
 
 /// Builder for configuring video encoder settings.
@@ -150,6 +228,14 @@ pub struct VideoSettingsBuilder {
 }
 
 impl VideoSettingsBuilder {
+    /// Constructs a new [`VideoSettingsBuilder`] with required geometry.
+    ///
+    /// Defaults:
+    /// - Subtype: [`VideoSettingsSubType::HEVC`]
+    /// - Bitrate: 15 Mbps
+    /// - Frame rate: 60 fps
+    /// - Pixel aspect ratio: 1:1
+    /// - Disabled: false
     pub const fn new(width: u32, height: u32) -> Self {
         Self {
             bitrate: 15_000_000,
@@ -162,30 +248,39 @@ impl VideoSettingsBuilder {
         }
     }
 
+    /// Sets the video codec/subtype (e.g., [`VideoSettingsSubType::HEVC`]).
     pub const fn sub_type(mut self, sub_type: VideoSettingsSubType) -> Self {
         self.sub_type = sub_type;
         self
     }
+    /// Sets target bitrate in bits per second.
     pub const fn bitrate(mut self, bitrate: u32) -> Self {
         self.bitrate = bitrate;
         self
     }
+    /// Sets target frame width in pixels.
     pub const fn width(mut self, width: u32) -> Self {
         self.width = width;
         self
     }
+    /// Sets target frame height in pixels.
     pub const fn height(mut self, height: u32) -> Self {
         self.height = height;
         self
     }
+    /// Sets target frame rate (numerator; denominator is fixed to 1).
     pub const fn frame_rate(mut self, frame_rate: u32) -> Self {
         self.frame_rate = frame_rate;
         self
     }
+    /// Sets pixel aspect ratio as (numerator, denominator).
     pub const fn pixel_aspect_ratio(mut self, par: (u32, u32)) -> Self {
         self.pixel_aspect_ratio = par;
         self
     }
+    /// Disables or enables video encoding.
+    ///
+    /// When `true`, calls to send frames still succeed but produce no video samples.
     pub const fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -216,6 +311,15 @@ pub struct AudioSettingsBuilder {
 }
 
 impl AudioSettingsBuilder {
+    /// Constructs a new [`AudioSettingsBuilder`] with common defaults.
+    ///
+    /// Defaults:
+    /// - Bitrate: 192 kbps
+    /// - Channels: 2
+    /// - Sample rate: 48 kHz
+    /// - Bits per sample: 16
+    /// - Subtype: [`AudioSettingsSubType::AAC`]
+    /// - Disabled: false
     pub const fn new() -> Self {
         Self {
             bitrate: 192_000,
@@ -226,26 +330,32 @@ impl AudioSettingsBuilder {
             disabled: false,
         }
     }
+    /// Sets audio bitrate in bits per second.
     pub const fn bitrate(mut self, bitrate: u32) -> Self {
         self.bitrate = bitrate;
         self
     }
+    /// Sets number of interleaved channels.
     pub const fn channel_count(mut self, channel_count: u32) -> Self {
         self.channel_count = channel_count;
         self
     }
+    /// Sets sample rate in Hz.
     pub const fn sample_rate(mut self, sample_rate: u32) -> Self {
         self.sample_rate = sample_rate;
         self
     }
+    /// Sets bits per sample.
     pub const fn bit_per_sample(mut self, bit_per_sample: u32) -> Self {
         self.bit_per_sample = bit_per_sample;
         self
     }
+    /// Sets audio codec/subtype (e.g., [`AudioSettingsSubType::AAC`]).
     pub const fn sub_type(mut self, sub_type: AudioSettingsSubType) -> Self {
         self.sub_type = sub_type;
         self
     }
+    /// Disables or enables audio encoding.
     pub const fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -273,9 +383,13 @@ pub struct ContainerSettingsBuilder {
     sub_type: ContainerSettingsSubType,
 }
 impl ContainerSettingsBuilder {
+    /// Constructs a new [`ContainerSettingsBuilder`].
+    ///
+    /// Default subtype: [`ContainerSettingsSubType::MPEG4`].
     pub const fn new() -> Self {
         Self { sub_type: ContainerSettingsSubType::MPEG4 }
     }
+    /// Sets the container subtype (e.g., [`ContainerSettingsSubType::MPEG4`]).
     pub const fn sub_type(mut self, sub_type: ContainerSettingsSubType) -> Self {
         self.sub_type = sub_type;
         self
@@ -295,30 +409,53 @@ impl Default for ContainerSettingsBuilder {
 /// Video encoder subtypes.
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub enum VideoSettingsSubType {
+    /// Uncompressed 32-bit ARGB (8:8:8:8).
     ARGB32,
+    /// Uncompressed 32-bit BGRA (8:8:8:8).
     BGRA8,
+    /// 16-bit depth format.
     D16,
+    /// H.263 video.
     H263,
+    /// H.264/AVC video.
     H264,
+    /// H.264 elementary stream.
     H264ES,
+    /// H.265/HEVC video.
     HEVC,
+    /// H.265/HEVC elementary stream.
     HEVCES,
+    /// Planar YUV 4:2:0 (IYUV).
     IYUV,
+    /// 8-bit luminance (grayscale).
     L8,
+    /// 16-bit luminance (grayscale).
     L16,
+    /// Motion JPEG.
     MJPG,
+    /// NV12 YUV 4:2:0 (semi-planar).
     NV12,
+    /// MPEG-1 video.
     MPEG1,
+    /// MPEG-2 video.
     MPEG2,
+    /// 24-bit RGB.
     RGB24,
+    /// 32-bit RGB.
     RGB32,
+    /// Windows Media Video 9 (WMV3).
     WMV3,
+    /// Windows Media Video Advanced Profile (VC-1).
     WVC1,
+    /// VP9 video.
     VP9,
+    /// Packed YUY2 4:2:2.
     YUY2,
+    /// Planar YV12 4:2:0.
     YV12,
 }
 impl VideoSettingsSubType {
+    /// Returns the Windows Media subtype identifier string for this [`VideoSettingsSubType`].
     pub fn to_hstring(&self) -> HSTRING {
         let s = match self {
             Self::ARGB32 => "ARGB32",
@@ -351,29 +488,51 @@ impl VideoSettingsSubType {
 /// Audio encoder subtypes.
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub enum AudioSettingsSubType {
+    /// Advanced Audio Coding (AAC).
     AAC,
+    /// Dolby Digital (AC-3).
     AC3,
+    /// AAC framed with ADTS headers.
     AACADTS,
+    /// AAC with HDCP protection.
     AACHDCP,
+    /// AC-3 over S/PDIF.
     AC3SPDIF,
+    /// AC-3 with HDCP protection.
     AC3HDCP,
+    /// ADTS (Audio Data Transport Stream).
     ADTS,
+    /// Apple Lossless Audio Codec (ALAC).
     ALAC,
+    /// Adaptive Multi-Rate Narrowband (AMR-NB).
     AMRNB,
+    /// Adaptive Multi-Rate Wideband (AMR-WB).
     AWRWB,
+    /// DTS audio.
     DTS,
+    /// Enhanced AC-3 (E-AC-3).
     EAC3,
+    /// Free Lossless Audio Codec (FLAC).
     FLAC,
+    /// 32-bit floating-point PCM.
     Float,
+    /// MPEG-1/2 Layer III (MP3).
     MP3,
+    /// Generic MPEG audio.
     MPEG,
+    /// Opus audio.
     OPUS,
+    /// Pulse-code modulation (PCM).
     PCM,
+    /// Windows Media Audio 8.
     WMA8,
+    /// Windows Media Audio 9.
     WMA9,
+    /// Vorbis audio.
     Vorbis,
 }
 impl AudioSettingsSubType {
+    /// Returns the Windows Media subtype identifier string for this [`AudioSettingsSubType`].
     pub fn to_hstring(&self) -> HSTRING {
         let s = match self {
             Self::AAC => "AAC",
@@ -405,19 +564,32 @@ impl AudioSettingsSubType {
 /// Container subtypes.
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub enum ContainerSettingsSubType {
+    /// Advanced Systems Format (ASF).
     ASF,
+    /// Raw MP3 container.
     MP3,
+    /// MPEG-4 container (e.g., MP4).
     MPEG4,
+    /// Audio Video Interleave (AVI).
     AVI,
+    /// MPEG-2 container.
     MPEG2,
+    /// WAVE (WAV) container.
     WAVE,
+    /// AAC ADTS stream.
     AACADTS,
+    /// ADTS container.
     ADTS,
+    /// 3GP container.
     GP3,
+    /// AMR container.
     AMR,
+    /// FLAC container.
     FLAC,
 }
 impl ContainerSettingsSubType {
+    /// Returns the Windows Media container subtype identifier string for this
+    /// [`ContainerSettingsSubType`].
     pub fn to_hstring(&self) -> HSTRING {
         match self {
             Self::ASF => HSTRING::from("ASF"),
@@ -436,6 +608,38 @@ impl ContainerSettingsSubType {
 }
 
 /// Encodes video frames (and optional audio) and writes them to a file or stream.
+///
+/// Frames are provided as Direct3D surfaces or raw BGRA buffers. Audio can be pushed
+/// as interleaved PCM bytes.
+///
+/// - Use [`VideoEncoder::new`] for file output or [`VideoEncoder::new_from_stream`] for stream
+///   output.
+/// - Push frames with [`VideoEncoder::send_frame`] or [`VideoEncoder::send_frame_buffer`].
+/// - Optionally push audio with [`VideoEncoder::send_audio_buffer`] or use
+///   [`VideoEncoder::send_frame_with_audio`].
+/// - Call [`VideoEncoder::finish`] to finalize the container.
+///
+/// # Example
+/// ```no_run
+/// use windows_capture::encoder::{
+///     AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder,
+/// };
+///
+/// // Create an encoder that outputs H.265 in an MP4 container
+/// let mut encoder = VideoEncoder::new(
+///     VideoSettingsBuilder::new(1920, 1080),
+///     AudioSettingsBuilder::new().disabled(true),
+///     ContainerSettingsBuilder::new(),
+///     "capture.mp4",
+/// )
+/// .unwrap();
+///
+/// // In your capture loop, push frames:
+/// // encoder.send_frame(&frame).unwrap();
+///
+/// // When done:
+/// // encoder.finish().unwrap();
+/// ```
 pub struct VideoEncoder {
     // Video timing
     first_timestamp: Option<TimeSpan>,
@@ -461,9 +665,61 @@ pub struct VideoEncoder {
     audio_sample_rate: u32,  // Hz (frames per second)
     audio_block_align: u32,  // bytes per interleaved sample frame (channels * (bits/8))
     audio_samples_sent: u64, // number of sample frames (not bytes) emitted so far
+
+    // Video sizing constraints
+    target_width: u32,
+    target_height: u32,
+    target_color_format: ColorFormat,
+
+    cached_surface: Option<CachedSurface>,
 }
 
 impl VideoEncoder {
+    fn create_cached_surface(
+        device: &ID3D11Device,
+        width: u32,
+        height: u32,
+        format: ColorFormat,
+    ) -> Result<CachedSurface, VideoEncoderError> {
+        let texture_desc = D3D11_TEXTURE2D_DESC {
+            Width: width,
+            Height: height,
+            MipLevels: 1,
+            ArraySize: 1,
+            Format: DXGI_FORMAT(format as i32),
+            SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+            Usage: D3D11_USAGE_DEFAULT,
+            BindFlags: (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32,
+            CPUAccessFlags: 0,
+            MiscFlags: 0,
+        };
+
+        let mut texture = None;
+        unsafe {
+            device.CreateTexture2D(&texture_desc, None, Some(&mut texture))?;
+        }
+        let texture = texture.expect("CreateTexture2D returned None");
+
+        let mut render_target = None;
+        unsafe {
+            device.CreateRenderTargetView(&texture, None, Some(&mut render_target))?;
+        }
+        let render_target_view = render_target.map(SendDirectX::new);
+
+        let dxgi_surface: IDXGISurface = texture.cast()?;
+        let inspectable = unsafe { CreateDirect3D11SurfaceFromDXGISurface(&dxgi_surface)? };
+        let surface: IDirect3DSurface = inspectable.cast()?;
+
+        Ok(CachedSurface {
+            width,
+            height,
+            format,
+            texture: SendDirectX::new(texture),
+            surface: SendDirectX::new(surface),
+            render_target_view,
+        })
+    }
+
     fn attach_sample_requested_handlers(
         media_stream_source: &MediaStreamSource,
         is_video_disabled: bool,
@@ -476,85 +732,41 @@ impl VideoEncoder {
         let token = media_stream_source.SampleRequested(&TypedEventHandler::<
             MediaStreamSource,
             MediaStreamSourceSampleRequestedEventArgs,
-        >::new(
-            move |_, sample_requested| {
-                let sample_requested = sample_requested.as_ref().expect(
-                    "MediaStreamSource SampleRequested parameter was None. This should not happen.",
-                );
+        >::new(move |_, sample_requested| {
+            let sample_requested = sample_requested
+                .as_ref()
+                .expect("MediaStreamSource SampleRequested parameter was None. This should not happen.");
 
-                let request = sample_requested.Request()?;
-                let is_audio = request.StreamDescriptor()?.cast::<AudioStreamDescriptor>().is_ok();
+            let request = sample_requested.Request()?;
+            let is_audio = request.StreamDescriptor()?.cast::<AudioStreamDescriptor>().is_ok();
 
-                // Always offload blocking work to the thread pool; never block the MSS event thread.
-                let deferral = request.GetDeferral()?;
+            // Always offload blocking work to the thread pool; never block the MSS event
+            // thread.
+            let deferral = request.GetDeferral()?;
 
-                if is_audio {
-                    if is_audio_disabled {
-                        request.SetSample(None)?;
-                        deferral.Complete()?;
-                    } else {
-                        let request_clone = request;
-                        let audio_receiver = audio_receiver.clone();
-                        ThreadPool::RunWithPriorityAndOptionsAsync(
-                            &WorkItemHandler::new(move |_| {
-                                let value = audio_receiver.lock().recv();
-                                match value {
-                                    Ok(Some((source, timestamp))) => {
-                                        let sample = match source {
-                                            AudioEncoderSource::Buffer(bytes) => {
-                                                let buf = CryptographicBuffer::CreateFromByteArray(
-                                                    &bytes,
-                                                )?;
-                                                let sample = MediaStreamSample::CreateFromBuffer(
-                                                    &buf, timestamp,
-                                                )?;
-                                                // Duration = (frames / sample_rate) in 100ns ticks
-                                                // frames = bytes / block_align
-                                                let frames =
-                                                    (bytes.len() as u32) / audio_block_align;
-                                                let duration_ticks = (frames as i64)
-                                                    * 10_000_000i64
-                                                    / (audio_sample_rate as i64);
-                                                sample.SetDuration(TimeSpan {
-                                                    Duration: duration_ticks,
-                                                })?;
-                                                sample
-                                            }
-                                        };
-                                        request_clone.SetSample(&sample)?;
-                                    }
-                                    Ok(None) | Err(_) => {
-                                        request_clone.SetSample(None)?;
-                                    }
-                                }
-                                deferral.Complete()?;
-                                Ok(())
-                            }),
-                            WorkItemPriority::Normal,
-                            WorkItemOptions::None, // None finishes tail work faster
-                        )?;
-                    }
-                } else if is_video_disabled {
+            if is_audio {
+                if is_audio_disabled {
                     request.SetSample(None)?;
                     deferral.Complete()?;
                 } else {
                     let request_clone = request;
-                    let frame_receiver = frame_receiver.clone();
+                    let audio_receiver = audio_receiver.clone();
                     ThreadPool::RunWithPriorityAndOptionsAsync(
                         &WorkItemHandler::new(move |_| {
-                            let value = frame_receiver.lock().recv();
+                            let value = audio_receiver.lock().recv();
                             match value {
                                 Ok(Some((source, timestamp))) => {
                                     let sample = match source {
-                                        VideoEncoderSource::DirectX(surface) => {
-                                            MediaStreamSample::CreateFromDirect3D11Surface(
-                                                &surface.0, timestamp,
-                                            )?
-                                        }
-                                        VideoEncoderSource::Buffer(bytes) => {
-                                            let buf =
-                                                CryptographicBuffer::CreateFromByteArray(&bytes)?;
-                                            MediaStreamSample::CreateFromBuffer(&buf, timestamp)?
+                                        AudioEncoderSource::Buffer(bytes) => {
+                                            let buf = CryptographicBuffer::CreateFromByteArray(&bytes)?;
+                                            let sample = MediaStreamSample::CreateFromBuffer(&buf, timestamp)?;
+                                            // Duration = (frames / sample_rate) in 100ns ticks
+                                            // frames = bytes / block_align
+                                            let frames = (bytes.len() as u32) / audio_block_align;
+                                            let duration_ticks =
+                                                (frames as i64) * 10_000_000i64 / (audio_sample_rate as i64);
+                                            sample.SetDuration(TimeSpan { Duration: duration_ticks })?;
+                                            sample
                                         }
                                     };
                                     request_clone.SetSample(&sample)?;
@@ -570,14 +782,46 @@ impl VideoEncoder {
                         WorkItemOptions::None,
                     )?;
                 }
+            } else if is_video_disabled {
+                request.SetSample(None)?;
+                deferral.Complete()?;
+            } else {
+                let request_clone = request;
+                let frame_receiver = frame_receiver.clone();
+                ThreadPool::RunWithPriorityAndOptionsAsync(
+                    &WorkItemHandler::new(move |_| {
+                        let value = frame_receiver.lock().recv();
+                        match value {
+                            Ok(Some((source, timestamp))) => {
+                                let sample = match source {
+                                    VideoEncoderSource::DirectX(surface) => {
+                                        MediaStreamSample::CreateFromDirect3D11Surface(&surface.0, timestamp)?
+                                    }
+                                    VideoEncoderSource::Buffer(bytes) => {
+                                        let buf = CryptographicBuffer::CreateFromByteArray(&bytes)?;
+                                        MediaStreamSample::CreateFromBuffer(&buf, timestamp)?
+                                    }
+                                };
+                                request_clone.SetSample(&sample)?;
+                            }
+                            Ok(None) | Err(_) => {
+                                request_clone.SetSample(None)?;
+                            }
+                        }
+                        deferral.Complete()?;
+                        Ok(())
+                    }),
+                    WorkItemPriority::Normal,
+                    WorkItemOptions::None,
+                )?;
+            }
 
-                Ok(())
-            },
-        ))?;
+            Ok(())
+        }))?;
         Ok(token)
     }
 
-    /// Creates a new `VideoEncoder` that writes to a file path.
+    /// Constructs a new `VideoEncoder` that writes to a file path.
     #[inline]
     pub fn new<P: AsRef<Path>>(
         video_settings: VideoSettingsBuilder,
@@ -594,6 +838,10 @@ impl VideoEncoder {
         media_encoding_profile.SetAudio(&audio_encoding_properties_cfg)?;
         let container_encoding_properties = container_settings.build()?;
         media_encoding_profile.SetContainer(&container_encoding_properties)?;
+
+        let target_width = video_encoding_properties_cfg.Width()?;
+        let target_height = video_encoding_properties_cfg.Height()?;
+        let target_color_format = ColorFormat::Bgra8;
 
         let video_encoding_properties = VideoEncodingProperties::CreateUncompressed(
             &MediaEncodingSubtypes::Bgra8()?,
@@ -616,10 +864,8 @@ impl VideoEncoder {
         let audio_bps = audio_desc_props.BitsPerSample()?;
         let audio_block_align = (audio_bps / 8) * audio_ch;
 
-        let media_stream_source = MediaStreamSource::CreateFromDescriptors(
-            &video_stream_descriptor,
-            &audio_stream_descriptor,
-        )?;
+        let media_stream_source =
+            MediaStreamSource::CreateFromDescriptors(&video_stream_descriptor, &audio_stream_descriptor)?;
         // Keep a modest buffer (30ms)
         media_stream_source.SetBufferTime(Duration::from_millis(30).into())?;
 
@@ -627,17 +873,14 @@ impl VideoEncoder {
             MediaStreamSource,
             MediaStreamSourceStartingEventArgs,
         >::new(move |_, stream_start| {
-            let stream_start = stream_start
-                .as_ref()
-                .expect("MediaStreamSource Starting parameter was None. This should not happen.");
+            let stream_start =
+                stream_start.as_ref().expect("MediaStreamSource Starting parameter was None. This should not happen.");
             stream_start.Request()?.SetActualStartPosition(TimeSpan { Duration: 0 })?;
             Ok(())
         }))?;
 
-        let (frame_sender, frame_receiver_raw) =
-            mpsc::channel::<Option<(VideoEncoderSource, TimeSpan)>>();
-        let (audio_sender, audio_receiver_raw) =
-            mpsc::channel::<Option<(AudioEncoderSource, TimeSpan)>>();
+        let (frame_sender, frame_receiver_raw) = mpsc::channel::<Option<(VideoEncoderSource, TimeSpan)>>();
+        let (audio_sender, audio_receiver_raw) = mpsc::channel::<Option<(AudioEncoderSource, TimeSpan)>>();
 
         let frame_receiver = Arc::new(Mutex::new(frame_receiver_raw));
         let audio_receiver = Arc::new(Mutex::new(audio_receiver_raw));
@@ -699,10 +942,14 @@ impl VideoEncoder {
             audio_sample_rate: audio_sr,
             audio_block_align,
             audio_samples_sent: 0,
+            target_width,
+            target_height,
+            target_color_format,
+            cached_surface: None,
         })
     }
 
-    /// Creates a new `VideoEncoder` that writes to the given stream.
+    /// Constructs a new `VideoEncoder` that writes to the given stream.
     #[inline]
     pub fn new_from_stream(
         video_settings: VideoSettingsBuilder,
@@ -718,6 +965,10 @@ impl VideoEncoder {
         media_encoding_profile.SetAudio(&audio_encoding_properties_cfg)?;
         let container_encoding_properties = container_settings.build()?;
         media_encoding_profile.SetContainer(&container_encoding_properties)?;
+
+        let target_width = video_encoding_properties_cfg.Width()?;
+        let target_height = video_encoding_properties_cfg.Height()?;
+        let target_color_format = ColorFormat::Bgra8;
 
         let video_encoding_properties = VideoEncodingProperties::CreateUncompressed(
             &MediaEncodingSubtypes::Bgra8()?,
@@ -739,10 +990,8 @@ impl VideoEncoder {
         let audio_bps = audio_desc_props.BitsPerSample()?;
         let audio_block_align = (audio_bps / 8) * audio_ch;
 
-        let media_stream_source = MediaStreamSource::CreateFromDescriptors(
-            &video_stream_descriptor,
-            &audio_stream_descriptor,
-        )?;
+        let media_stream_source =
+            MediaStreamSource::CreateFromDescriptors(&video_stream_descriptor, &audio_stream_descriptor)?;
         // CHANGED: use 30ms buffer (was 0)
         media_stream_source.SetBufferTime(Duration::from_millis(30).into())?;
 
@@ -750,17 +999,14 @@ impl VideoEncoder {
             MediaStreamSource,
             MediaStreamSourceStartingEventArgs,
         >::new(move |_, stream_start| {
-            let stream_start = stream_start
-                .as_ref()
-                .expect("MediaStreamSource Starting parameter was None. This should not happen.");
+            let stream_start =
+                stream_start.as_ref().expect("MediaStreamSource Starting parameter was None. This should not happen.");
             stream_start.Request()?.SetActualStartPosition(TimeSpan { Duration: 0 })?;
             Ok(())
         }))?;
 
-        let (frame_sender, frame_receiver_raw) =
-            mpsc::channel::<Option<(VideoEncoderSource, TimeSpan)>>();
-        let (audio_sender, audio_receiver_raw) =
-            mpsc::channel::<Option<(AudioEncoderSource, TimeSpan)>>();
+        let (frame_sender, frame_receiver_raw) = mpsc::channel::<Option<(VideoEncoderSource, TimeSpan)>>();
+        let (audio_sender, audio_receiver_raw) = mpsc::channel::<Option<(AudioEncoderSource, TimeSpan)>>();
 
         let frame_receiver = Arc::new(Mutex::new(frame_receiver_raw));
         let audio_receiver = Arc::new(Mutex::new(audio_receiver_raw));
@@ -779,11 +1025,7 @@ impl VideoEncoder {
         media_transcoder.SetHardwareAccelerationEnabled(true)?;
 
         let transcode = media_transcoder
-            .PrepareMediaStreamSourceTranscodeAsync(
-                &media_stream_source,
-                &stream,
-                &media_encoding_profile,
-            )?
+            .PrepareMediaStreamSourceTranscodeAsync(&media_stream_source, &stream, &media_encoding_profile)?
             .join()?;
 
         let error_notify = Arc::new(AtomicBool::new(false));
@@ -814,7 +1056,60 @@ impl VideoEncoder {
             audio_sample_rate: audio_sr,
             audio_block_align,
             audio_samples_sent: 0,
+            target_width,
+            target_height,
+            target_color_format,
+            cached_surface: None,
         })
+    }
+
+    fn build_padded_surface(&mut self, frame: &Frame) -> Result<SendDirectX<IDirect3DSurface>, VideoEncoderError> {
+        let frame_format = frame.color_format();
+        let needs_recreate = self.cached_surface.as_ref().is_none_or(|cache| {
+            cache.format != frame_format || cache.width != self.target_width || cache.height != self.target_height
+        });
+
+        if needs_recreate {
+            let surface =
+                Self::create_cached_surface(frame.device(), self.target_width, self.target_height, frame_format)?;
+            self.cached_surface = Some(surface);
+            self.target_color_format = frame_format;
+        }
+
+        let cache = self.cached_surface.as_mut().expect("cached_surface must be populated before use");
+        let context = frame.device_context();
+
+        if let Some(rtv) = &cache.render_target_view {
+            let clear_color = [0.0f32, 0.0, 0.0, 1.0];
+            unsafe {
+                context.ClearRenderTargetView(&rtv.0, &clear_color);
+            }
+        }
+
+        let copy_width = self.target_width.min(frame.width());
+        let copy_height = self.target_height.min(frame.height());
+
+        if copy_width > 0 && copy_height > 0 {
+            let source_box = D3D11_BOX { left: 0, top: 0, front: 0, right: copy_width, bottom: copy_height, back: 1 };
+            unsafe {
+                context.CopySubresourceRegion(
+                    &cache.texture.0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    frame.as_raw_texture(),
+                    0,
+                    Some(&source_box),
+                );
+            }
+        }
+
+        unsafe {
+            context.Flush();
+        }
+
+        Ok(SendDirectX::new(cache.surface.0.clone()))
     }
 
     /// Sends a video frame (DirectX). Returns immediately.
@@ -833,12 +1128,13 @@ impl VideoEncoder {
             }
         };
 
-        self.frame_sender.send(Some((
-            VideoEncoderSource::DirectX(SendDirectX::new(unsafe {
-                frame.as_raw_surface().clone()
-            })),
-            timestamp,
-        )))?;
+        let surface = if frame.width() == self.target_width && frame.height() == self.target_height {
+            SendDirectX::new(frame.as_raw_surface().clone())
+        } else {
+            self.build_padded_surface(frame)?
+        };
+
+        self.frame_sender.send(Some((VideoEncoderSource::DirectX(surface), timestamp)))?;
 
         if self.error_notify.load(atomic::Ordering::Relaxed)
             && let Some(t) = self.transcode_thread.take()
@@ -852,11 +1148,7 @@ impl VideoEncoder {
     /// Sends a video frame and an audio buffer (owned). Returns immediately.
     /// Audio timestamp is derived from total samples sent so far (monotonic).
     #[inline]
-    pub fn send_frame_with_audio(
-        &mut self,
-        frame: &mut Frame,
-        audio_buffer: &[u8],
-    ) -> Result<(), VideoEncoderError> {
+    pub fn send_frame_with_audio(&mut self, frame: &mut Frame, audio_buffer: &[u8]) -> Result<(), VideoEncoderError> {
         if self.is_video_disabled {
             return Err(VideoEncoderError::VideoDisabled);
         }
@@ -874,21 +1166,20 @@ impl VideoEncoder {
             }
         };
 
-        self.frame_sender.send(Some((
-            VideoEncoderSource::DirectX(SendDirectX::new(unsafe {
-                frame.as_raw_surface().clone()
-            })),
-            video_ts,
-        )))?;
+        let surface = if frame.width() == self.target_width && frame.height() == self.target_height {
+            SendDirectX::new(frame.as_raw_surface().clone())
+        } else {
+            self.build_padded_surface(frame)?
+        };
+
+        self.frame_sender.send(Some((VideoEncoderSource::DirectX(surface), video_ts)))?;
 
         // Audio timestamp from running sample count
         let frames_in_buf = (audio_buffer.len() as u32) / self.audio_block_align;
-        let audio_ts_ticks =
-            ((self.audio_samples_sent as i128) * 10_000_000i128) / (self.audio_sample_rate as i128);
+        let audio_ts_ticks = ((self.audio_samples_sent as i128) * 10_000_000i128) / (self.audio_sample_rate as i128);
         let audio_ts = TimeSpan { Duration: audio_ts_ticks as i64 };
 
-        self.audio_sender
-            .send(Some((AudioEncoderSource::Buffer(audio_buffer.to_vec()), audio_ts)))?;
+        self.audio_sender.send(Some((AudioEncoderSource::Buffer(audio_buffer.to_vec()), audio_ts)))?;
 
         // Advance counter after stamping
         self.audio_samples_sent = self.audio_samples_sent.saturating_add(frames_in_buf as u64);
@@ -905,11 +1196,7 @@ impl VideoEncoder {
     /// Sends a raw frame buffer (owned inside). Returns immediately.
     /// Windows expects BGRA and bottom-to-top layout for this path.
     #[inline]
-    pub fn send_frame_buffer(
-        &mut self,
-        buffer: &[u8],
-        timestamp: i64,
-    ) -> Result<(), VideoEncoderError> {
+    pub fn send_frame_buffer(&mut self, buffer: &[u8], timestamp: i64) -> Result<(), VideoEncoderError> {
         if self.is_video_disabled {
             return Err(VideoEncoderError::VideoDisabled);
         }
@@ -947,8 +1234,7 @@ impl VideoEncoder {
         }
 
         let frames_in_buf = (buffer.len() as u32) / self.audio_block_align;
-        let audio_ts_ticks =
-            ((self.audio_samples_sent as i128) * 10_000_000i128) / (self.audio_sample_rate as i128);
+        let audio_ts_ticks = ((self.audio_samples_sent as i128) * 10_000_000i128) / (self.audio_sample_rate as i128);
         let timestamp = TimeSpan { Duration: audio_ts_ticks as i64 };
 
         self.audio_sender.send(Some((AudioEncoderSource::Buffer(buffer.to_vec()), timestamp)))?;
@@ -971,13 +1257,11 @@ impl VideoEncoder {
         let _ = self.frame_sender.send(None);
         let _ = self.audio_sender.send(None);
 
-        // 2) **Close the channels** so any further recv() returns Err immediately.
-        //    We replace the fields with dummy senders and drop the originals now.
+        // 2) **Close the channels** so any further recv() returns Err immediately. We replace the fields
+        //    with dummy senders and drop the originals now.
         {
-            let (dummy_tx_v, _dummy_rx_v) =
-                mpsc::channel::<Option<(VideoEncoderSource, TimeSpan)>>();
-            let (dummy_tx_a, _dummy_rx_a) =
-                mpsc::channel::<Option<(AudioEncoderSource, TimeSpan)>>();
+            let (dummy_tx_v, _dummy_rx_v) = mpsc::channel::<Option<(VideoEncoderSource, TimeSpan)>>();
+            let (dummy_tx_a, _dummy_rx_a) = mpsc::channel::<Option<(AudioEncoderSource, TimeSpan)>>();
 
             let old_v = std::mem::replace(&mut self.frame_sender, dummy_tx_v);
             let old_a = std::mem::replace(&mut self.audio_sender, dummy_tx_a);

@@ -1,0 +1,403 @@
+//! DXGI Desktop Duplication API wrapper.
+//!
+//! This module provides [`DxgiDuplicationApi`] to capture a monitor using the
+//! Windows DXGI Desktop Duplication API. It integrates with [`crate::monitor::Monitor`]
+//! to select the target output and exposes CPU-readable frames via [`crate::frame::FrameBuffer`].
+//!
+//! # Example
+//! ```no_run
+//! use windows_capture::dxgi_duplication_api::DxgiDuplicationApi;
+//! use windows_capture::frame::ImageFormat;
+//! use windows_capture::monitor::Monitor;
+//!
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Select the primary monitor
+//!     let monitor = Monitor::primary()?;
+//!
+//!     // Create a duplication session for this monitor
+//!     let mut dup = DxgiDuplicationApi::new(monitor)?;
+//!
+//!     // Try to grab one frame within ~33ms (about 30 FPS budget)
+//!     let mut frame = dup.acquire_next_frame(33)?;
+//!
+//!     // Map the GPU image into CPU memory and save a PNG
+//!     let mut buffer = frame.buffer()?;
+//!     buffer.save_as_image("dup.png", ImageFormat::Png)?;
+//!     Ok(())
+//! }
+//! ```
+use std::slice;
+
+use windows::Win32::Graphics::Direct3D11::{
+    D3D11_CPU_ACCESS_READ, D3D11_CPU_ACCESS_WRITE, D3D11_MAP_READ_WRITE, D3D11_MAPPED_SUBRESOURCE,
+    D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+};
+use windows::Win32::Graphics::Dxgi::Common::{
+    DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT,
+    DXGI_SAMPLE_DESC,
+};
+use windows::Win32::Graphics::Dxgi::{
+    DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_DESC, DXGI_OUTDUPL_FRAME_INFO, IDXGIDevice,
+    IDXGIOutput1, IDXGIOutputDuplication,
+};
+use windows::core::Interface;
+
+use crate::d3d11::{StagingTexture, create_d3d_device};
+use crate::frame::FrameBuffer;
+use crate::monitor::Monitor;
+use crate::settings::ColorFormat;
+
+/// Errors that can occur while using the DXGI Desktop Duplication API wrapper.
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    /// Failed to find a DXGI output that corresponds to the provided monitor.
+    #[error("Failed to find DXGI output for the specified monitor")]
+    OutputNotFound,
+    /// AcquireNextFrame timed out without a new frame becoming available.
+    #[error("AcquireNextFrame timed out")]
+    FrameTimeout,
+    /// The duplication access was lost and must be recreated.
+    #[error("Duplication access lost; the duplication must be recreated")]
+    AccessLost,
+    /// DirectX device creation or related error.
+    #[error("DirectX error: {0}")]
+    DirectXError(#[from] crate::d3d11::Error),
+    /// Unsupported color format encountered.
+    #[error("Unsupported color format: {0:?}")]
+    UnsupportedColorFormat(DXGI_FORMAT),
+    /// Invalid or mismatched staging texture supplied to [`DuplicationFrame::buffer_with`].
+    #[error("Invalid staging texture: {0}")]
+    InvalidStagingTexture(&'static str),
+    /// Windows API error.
+    #[error("Windows API error: {0}")]
+    WindowsError(#[from] windows::core::Error),
+}
+
+/// A minimal, ergonomic wrapper around the DXGI Desktop Duplication API for capturing a monitor.
+///
+/// This wrapper focuses on staying close to the native API while providing a simple Rust interface.
+/// It integrates with [`crate::monitor::Monitor`] to select the target output.
+pub struct DxgiDuplicationApi {
+    /// Direct3D 11 device used for duplication operations.
+    d3d_device: ID3D11Device,
+    /// Direct3D 11 device context used for copy/map operations.
+    d3d_device_context: ID3D11DeviceContext,
+    /// The duplication interface used to acquire frames.
+    duplication: IDXGIOutputDuplication,
+    /// Description of the duplication, including format and dimensions.
+    duplication_desc: DXGI_OUTDUPL_DESC,
+}
+
+impl DxgiDuplicationApi {
+    /// Constructs a new duplication session for the specified monitor.
+    ///
+    /// Internally creates a Direct3D 11 device and immediate context using the crate's d3d11
+    /// module.
+    #[inline]
+    pub fn new(monitor: Monitor) -> Result<Self, Error> {
+        // Create D3D11 device and context.
+        let (d3d_device, d3d_device_context) = create_d3d_device()?;
+
+        // Get the adapter used by the created device.
+        let dxgi_device: IDXGIDevice = d3d_device.cast()?;
+        let adapter = unsafe { dxgi_device.GetAdapter()? };
+
+        // Find the DXGI output that corresponds to the provided HMONITOR.
+        let found_output;
+        let mut index = 0u32;
+        loop {
+            let output = unsafe { adapter.EnumOutputs(index) }?;
+            let desc = unsafe { output.GetDesc()? };
+            if desc.Monitor.0 == monitor.as_raw_hmonitor() {
+                found_output = Some(output);
+                break;
+            }
+            index += 1;
+        }
+
+        let Some(output) = found_output else {
+            return Err(Error::OutputNotFound);
+        };
+
+        // IDXGIOutput1 is required for DuplicateOutput.
+        let output1: IDXGIOutput1 = output.cast()?;
+
+        // Create the duplication for this output using the supplied D3D11 device.
+        let duplication = unsafe { output1.DuplicateOutput(&d3d_device)? };
+
+        // Get the duplication description to determine the format for our internal texture.
+        let duplication_desc = unsafe { duplication.GetDesc() };
+
+        Ok(Self { d3d_device, d3d_device_context, duplication, duplication_desc })
+    }
+
+    /// Gets the underlying [`windows::Win32::Graphics::Direct3D11::ID3D11Device`] associated with
+    /// this object.
+    #[inline]
+    #[must_use]
+    pub const fn device(&self) -> &ID3D11Device {
+        &self.d3d_device
+    }
+
+    /// Gets the underlying [`windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext`] used for
+    /// GPU operations.
+    #[inline]
+    #[must_use]
+    pub const fn device_context(&self) -> &ID3D11DeviceContext {
+        &self.d3d_device_context
+    }
+
+    /// Gets the underlying [`windows::Win32::Graphics::Dxgi::IDXGIOutputDuplication`] interface.
+    #[inline]
+    #[must_use]
+    pub const fn duplication(&self) -> &IDXGIOutputDuplication {
+        &self.duplication
+    }
+
+    /// Gets the [`windows::Win32::Graphics::Dxgi::DXGI_OUTDUPL_DESC`] of the duplication.
+    #[inline]
+    #[must_use]
+    pub const fn duplication_desc(&self) -> &DXGI_OUTDUPL_DESC {
+        &self.duplication_desc
+    }
+
+    /// Acquires the next frame and updates the internal texture.
+    ///
+    /// This call will block up to `timeout_ms` milliseconds. If no new frame arrives within
+    /// the timeout, [`Error::FrameTimeout`] is returned. If duplication access is lost,
+    /// [`Error::AccessLost`] is returned and a new duplication should be created via
+    /// [`DxgiDuplicationApi::new`].
+    ///
+    /// The returned [`DuplicationFrame`] allows you to map the current full desktop image via
+    /// [`DuplicationFrame::buffer`]. It contains the list of dirty rectangles reported for this
+    /// frame.
+    ///
+    /// # Errors
+    /// - [`Error::FrameTimeout`] when no frame arrives within `timeout_ms`
+    /// - [`Error::AccessLost`] when duplication access is lost and must be recreated
+    /// - [`Error::WindowsError`] for other Windows API failures during frame acquisition
+    #[inline]
+    pub fn acquire_next_frame(&mut self, timeout_ms: u32) -> Result<DuplicationFrame<'_>, Error> {
+        let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
+        let mut resource = None;
+
+        // Acquire frame
+        unsafe {
+            match self.duplication.AcquireNextFrame(timeout_ms, &mut frame_info, &mut resource) {
+                Ok(_) => {}
+                Err(e) => {
+                    if e.code() == DXGI_ERROR_WAIT_TIMEOUT {
+                        return Err(Error::FrameTimeout);
+                    } else if e.code() == DXGI_ERROR_ACCESS_LOST {
+                        return Err(Error::AccessLost);
+                    } else {
+                        return Err(Error::WindowsError(e));
+                    }
+                }
+            }
+        }
+
+        let resource = resource.expect("AcquireNextFrame succeeded but returned no resource");
+
+        // Convert the resource to an ID3D11Texture2D.
+        let frame_texture: ID3D11Texture2D = resource.cast()?;
+
+        // Obtain texture description to get size/format details.
+        let mut frame_desc = D3D11_TEXTURE2D_DESC::default();
+        unsafe { frame_texture.GetDesc(&mut frame_desc) };
+
+        Ok(DuplicationFrame {
+            d3d_device: &self.d3d_device,
+            d3d_device_context: &self.d3d_device_context,
+            duplication: &self.duplication,
+            texture: frame_texture,
+            texture_desc: frame_desc,
+        })
+    }
+}
+
+/// Represents a pre-assembled full desktop image for the current frame,
+/// backed by the internal GPU texture.
+/// Call [`DuplicationFrame::buffer`] to obtain a CPU-readable [`crate::frame::FrameBuffer`].
+pub struct DuplicationFrame<'a> {
+    d3d_device: &'a ID3D11Device,
+    d3d_device_context: &'a ID3D11DeviceContext,
+    duplication: &'a IDXGIOutputDuplication,
+    texture: ID3D11Texture2D,
+    texture_desc: D3D11_TEXTURE2D_DESC,
+}
+
+impl<'a> DuplicationFrame<'a> {
+    /// Gets the width of the frame.
+    #[inline]
+    #[must_use]
+    pub const fn width(&self) -> u32 {
+        self.texture_desc.Width
+    }
+
+    /// Gets the height of the frame.
+    #[inline]
+    #[must_use]
+    pub const fn height(&self) -> u32 {
+        self.texture_desc.Height
+    }
+
+    /// Gets the underlying Direct3D device associated with this frame.
+    #[inline]
+    #[must_use]
+    pub const fn device(&self) -> &ID3D11Device {
+        self.d3d_device
+    }
+
+    /// Gets the underlying Direct3D device context used for GPU operations.
+    #[inline]
+    #[must_use]
+    pub const fn device_context(&self) -> &ID3D11DeviceContext {
+        self.d3d_device_context
+    }
+
+    /// Gets the underlying IDXGIOutputDuplication interface.
+    #[inline]
+    #[must_use]
+    pub const fn duplication(&self) -> &IDXGIOutputDuplication {
+        self.duplication
+    }
+
+    /// Gets the underlying [`windows::Win32::Graphics::Direct3D11::ID3D11Texture2D`] interface.
+    #[inline]
+    #[must_use]
+    pub const fn texture(&self) -> &ID3D11Texture2D {
+        &self.texture
+    }
+
+    /// Gets the [`windows::Win32::Graphics::Direct3D11::D3D11_TEXTURE2D_DESC`] of the underlying
+    /// texture.
+    #[inline]
+    #[must_use]
+    pub const fn texture_desc(&self) -> &D3D11_TEXTURE2D_DESC {
+        &self.texture_desc
+    }
+
+    /// Maps the internal frame into CPU accessible memory and returns a
+    /// [`crate::frame::FrameBuffer`].
+    ///
+    /// This creates a staging texture, copies the internal texture into it,
+    /// and maps it for CPU read/write. The returned buffer may include row padding;
+    /// you can use [`crate::frame::FrameBuffer::as_nopadding_buffer`] to obtain a packed
+    /// representation.
+    #[inline]
+    pub fn buffer(&'_ mut self) -> Result<FrameBuffer<'_>, Error> {
+        // Staging texture settings
+        let texture_desc = D3D11_TEXTURE2D_DESC {
+            Width: self.texture_desc.Width,
+            Height: self.texture_desc.Height,
+            MipLevels: 1,
+            ArraySize: 1,
+            Format: self.texture_desc.Format,
+            SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+            Usage: D3D11_USAGE_STAGING,
+            BindFlags: 0,
+            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32 | D3D11_CPU_ACCESS_WRITE.0 as u32,
+            MiscFlags: 0,
+        };
+
+        // Create a CPU-readable staging texture
+        let mut staging = None;
+        unsafe {
+            self.d3d_device.CreateTexture2D(&texture_desc, None, Some(&mut staging))?;
+        };
+        let staging = staging.unwrap();
+
+        // Copy from the internal GPU texture into the staging texture
+        unsafe {
+            self.d3d_device_context.CopyResource(&staging, &self.texture);
+        };
+
+        // Map the staging texture for CPU access
+        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+        unsafe {
+            self.d3d_device_context.Map(&staging, 0, D3D11_MAP_READ_WRITE, 0, Some(&mut mapped))?;
+        };
+
+        // SAFETY: The staging texture remains alive for the scope of this function.
+        let mapped_frame_data = unsafe {
+            slice::from_raw_parts_mut(mapped.pData.cast(), (self.texture_desc.Height * mapped.RowPitch) as usize)
+        };
+
+        let color_format = match self.texture_desc.Format {
+            DXGI_FORMAT_B8G8R8A8_UNORM => ColorFormat::Bgra8,
+            DXGI_FORMAT_R8G8B8A8_UNORM => ColorFormat::Rgba8,
+            DXGI_FORMAT_R16G16B16A16_FLOAT => ColorFormat::Rgba16F,
+            _ => return Err(Error::UnsupportedColorFormat(self.texture_desc.Format)),
+        };
+
+        Ok(FrameBuffer::new(
+            mapped_frame_data,
+            self.texture_desc.Width,
+            self.texture_desc.Height,
+            mapped.RowPitch,
+            mapped.DepthPitch,
+            color_format,
+        ))
+    }
+
+    /// Advanced: reuse your own CPU staging texture ([`crate::d3d11::StagingTexture`]).
+    ///
+    /// This avoids per-frame allocations and lets you manage the texture’s lifetime.
+    /// The `staging` texture must be a `D3D11_USAGE_STAGING` 2D texture with CPU read/write access,
+    /// matching the frame’s width/height/format.
+    #[inline]
+    pub fn buffer_with<'s>(&'s mut self, staging: &'s mut StagingTexture) -> Result<FrameBuffer<'s>, Error> {
+        // Validate geometry/format match.
+        let sdesc = staging.desc();
+
+        if sdesc.Width != self.texture_desc.Width || sdesc.Height != self.texture_desc.Height {
+            return Err(Error::InvalidStagingTexture("geometry must match the frame"));
+        }
+
+        if sdesc.Format != self.texture_desc.Format {
+            return Err(Error::InvalidStagingTexture("format must match the frame"));
+        }
+
+        // Copy the acquired duplication texture into the provided staging texture
+        unsafe {
+            self.d3d_device_context.CopyResource(staging.texture(), &self.texture);
+        }
+
+        // Map the staging texture for CPU access
+        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+        unsafe {
+            self.d3d_device_context.Map(staging.texture(), 0, D3D11_MAP_READ_WRITE, 0, Some(&mut mapped))?;
+        }
+
+        // SAFETY: staging lives for 's and remains alive while the FrameBuffer is borrowed.
+        let mapped_frame_data = unsafe {
+            slice::from_raw_parts_mut(mapped.pData.cast(), (self.texture_desc.Height * mapped.RowPitch) as usize)
+        };
+
+        let color_format = match self.texture_desc.Format {
+            DXGI_FORMAT_B8G8R8A8_UNORM => ColorFormat::Bgra8,
+            DXGI_FORMAT_R8G8B8A8_UNORM => ColorFormat::Rgba8,
+            DXGI_FORMAT_R16G16B16A16_FLOAT => ColorFormat::Rgba16F,
+            _ => return Err(Error::UnsupportedColorFormat(self.texture_desc.Format)),
+        };
+
+        Ok(FrameBuffer::new(
+            mapped_frame_data,
+            self.texture_desc.Width,
+            self.texture_desc.Height,
+            mapped.RowPitch,
+            mapped.DepthPitch,
+            color_format,
+        ))
+    }
+}
+
+impl Drop for DuplicationFrame<'_> {
+    fn drop(&mut self) {
+        // Release the frame back to the duplication interface.
+        unsafe {
+            let _ = self.duplication.ReleaseFrame();
+        }
+    }
+}

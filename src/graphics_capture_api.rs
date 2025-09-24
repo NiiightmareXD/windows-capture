@@ -5,15 +5,12 @@ use parking_lot::Mutex;
 use windows::Foundation::Metadata::ApiInformation;
 use windows::Foundation::TypedEventHandler;
 use windows::Graphics::Capture::{
-    Direct3D11CaptureFramePool, GraphicsCaptureDirtyRegionMode, GraphicsCaptureItem,
-    GraphicsCaptureSession,
+    Direct3D11CaptureFramePool, GraphicsCaptureDirtyRegionMode, GraphicsCaptureItem, GraphicsCaptureSession,
 };
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
 use windows::Win32::Foundation::{LPARAM, WPARAM};
-use windows::Win32::Graphics::Direct3D11::{
-    D3D11_TEXTURE2D_DESC, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
-};
+use windows::Win32::Graphics::Direct3D11::{D3D11_TEXTURE2D_DESC, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D};
 use windows::Win32::System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess;
 use windows::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
 use windows::core::{HSTRING, IInspectable, Interface};
@@ -22,38 +19,47 @@ use crate::capture::GraphicsCaptureApiHandler;
 use crate::d3d11::{self, SendDirectX, create_direct3d_device};
 use crate::frame::Frame;
 use crate::settings::{
-    ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
-    GraphicsCaptureItemWithDetails, MinimumUpdateIntervalSettings, SecondaryWindowSettings,
+    ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings, GraphicsCaptureItemWithDetails,
+    MinimumUpdateIntervalSettings, SecondaryWindowSettings,
 };
 
 #[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
+/// Errors that can occur when configuring or running a Windows Graphics Capture session.
 pub enum Error {
+    /// The Windows Graphics Capture API is not available on this OS.
     #[error("The Graphics Capture API is not supported on this platform.")]
     Unsupported,
-    #[error(
-        "Toggling cursor capture is not supported by the Graphics Capture API on this platform."
-    )]
+    /// Toggling cursor capture isn't supported on this platform/OS build.
+    #[error("Toggling cursor capture is not supported by the Graphics Capture API on this platform.")]
     CursorConfigUnsupported,
-    #[error(
-        "Toggling the capture border is not supported by the Graphics Capture API on this platform."
-    )]
+    /// Toggling the capture border isn't supported on this platform/OS build.
+    #[error("Toggling the capture border is not supported by the Graphics Capture API on this platform.")]
     BorderConfigUnsupported,
-    #[error(
-        "Capturing secondary windows is not supported by the Graphics Capture API on this platform."
-    )]
+    /// Capturing secondary (owned) windows isn't supported on this platform/OS build.
+    #[error("Capturing secondary windows is not supported by the Graphics Capture API on this platform.")]
     SecondaryWindowsUnsupported,
-    #[error(
-        "Setting a minimum update interval is not supported by the Graphics Capture API on this platform."
-    )]
+    /// Setting a minimum frame update interval isn't supported on this platform/OS build.
+    #[error("Setting a minimum update interval is not supported by the Graphics Capture API on this platform.")]
     MinimumUpdateIntervalUnsupported,
+    /// Dirty region tracking isn't supported on this platform/OS build.
     #[error("Dirty region tracking is not supported by the Graphics Capture API on this platform.")]
     DirtyRegionUnsupported,
+    /// Capture has already been started for this session.
     #[error("The capture has already been started.")]
     AlreadyStarted,
+    /// Underlying Direct3D (D3D11) error.
+    ///
+    /// Wraps [`crate::d3d11::Error`].
     #[error("DirectX error: {0}")]
     DirectXError(#[from] d3d11::Error),
+    /// Window helper error.
+    ///
+    /// Wraps [`crate::window::Error`].
     #[error("Window error: {0}")]
     WindowError(#[from] crate::window::Error),
+    /// A Windows Runtime/Win32 API call failed.
+    ///
+    /// Wraps [`windows::core::Error`].
     #[error("Windows API error: {0}")]
     WindowsError(#[from] windows::core::Error),
 }
@@ -64,17 +70,9 @@ pub struct InternalCaptureControl {
 }
 
 impl InternalCaptureControl {
-    /// Creates a new `InternalCaptureControl` struct.
-    ///
-    /// # Arguments
-    ///
-    /// * `stop` - An `Arc<AtomicBool>` used to signal the capture thread to stop.
-    ///
-    /// # Returns
-    ///
-    /// Returns a new `InternalCaptureControl` instance.
-    #[must_use]
+    /// Constructs a new `InternalCaptureControl` struct.
     #[inline]
+    #[must_use]
     pub const fn new(stop: Arc<AtomicBool>) -> Self {
         Self { stop }
     }
@@ -88,11 +86,12 @@ impl InternalCaptureControl {
 
 /// Manages a graphics capture session using the Windows Graphics Capture API.
 pub struct GraphicsCaptureApi {
-    /// The `GraphicsCaptureItem` to be captured (e.g., a window or monitor).
+    //// The [`windows::Graphics::Capture::GraphicsCaptureItem`] to be captured (e.g., a window or
+    //// monitor).
     item_with_details: GraphicsCaptureItemWithDetails,
     /// The Direct3D 11 device used for the capture.
     _d3d_device: ID3D11Device,
-    /// The WinRT `IDirect3DDevice` wrapper.
+    //// The WinRT [`windows::Graphics::DirectX::Direct3D11::IDirect3DDevice`] wrapper.
     _direct3d_device: IDirect3DDevice,
     /// The Direct3D 11 device context.
     _d3d_device_context: ID3D11DeviceContext,
@@ -111,34 +110,13 @@ pub struct GraphicsCaptureApi {
 }
 
 impl GraphicsCaptureApi {
-    /// Creates a new `GraphicsCaptureApi` instance.
+    /// Constructs a new [`GraphicsCaptureApi`] instance.
     ///
-    /// # Arguments
-    ///
-    /// * `d3d_device` - The `ID3D11Device` to be used for the capture.
-    /// * `d3d_device_context` - The `ID3D11DeviceContext` to be used for the capture.
-    /// * `item` - The `GraphicsCaptureItem` to be captured.
-    /// * `item_type` - The type of the item being captured (e.g., window or monitor).
-    /// * `callback` - The user-provided handler for processing captured frames and events.
-    /// * `cursor_capture_settings` - The settings for cursor visibility in the capture.
-    /// * `draw_border_settings` - The settings for drawing a border around the captured item.
-    /// * `secondary_window_settings` - The settings for including secondary windows in the capture.
-    /// * `minimum_update_interval_settings` - The settings for the minimum time between frame updates.
-    /// * `dirty_region_settings` - The settings for how dirty regions are handled.
-    /// * `color_format` - The desired pixel format for the captured frames.
-    /// * `thread_id` - The ID of the thread that owns the message loop.
-    /// * `result` - An `Arc<Mutex<Option<E>>>` to store any errors that occur in the callbacks.
-    ///
-    /// # Returns
-    ///
-    /// Returns a `Result` containing the new `GraphicsCaptureApi` instance if successful,
-    /// or an `Error` if initialization fails.
+    /// For parameter details, see the type names in the signature; complex behavior is documented
+    /// inline below where relevant.
     #[allow(clippy::too_many_arguments)]
     #[inline]
-    pub fn new<
-        T: GraphicsCaptureApiHandler<Error = E> + Send + 'static,
-        E: Send + Sync + 'static,
-    >(
+    pub fn new<T: GraphicsCaptureApiHandler<Error = E> + Send + 'static, E: Send + Sync + 'static>(
         d3d_device: ID3D11Device,
         d3d_device_context: ID3D11DeviceContext,
         item_with_details: GraphicsCaptureItemWithDetails,
@@ -157,21 +135,15 @@ impl GraphicsCaptureApi {
             return Err(Error::Unsupported);
         }
 
-        if cursor_capture_settings != CursorCaptureSettings::Default
-            && !Self::is_cursor_settings_supported()?
-        {
+        if cursor_capture_settings != CursorCaptureSettings::Default && !Self::is_cursor_settings_supported()? {
             return Err(Error::CursorConfigUnsupported);
         }
 
-        if draw_border_settings != DrawBorderSettings::Default
-            && !Self::is_border_settings_supported()?
-        {
+        if draw_border_settings != DrawBorderSettings::Default && !Self::is_border_settings_supported()? {
             return Err(Error::BorderConfigUnsupported);
         }
 
-        if secondary_window_settings != SecondaryWindowSettings::Default
-            && !Self::is_secondary_windows_supported()?
-        {
+        if secondary_window_settings != SecondaryWindowSettings::Default && !Self::is_secondary_windows_supported()? {
             return Err(Error::SecondaryWindowsUnsupported);
         }
 
@@ -181,9 +153,7 @@ impl GraphicsCaptureApi {
             return Err(Error::MinimumUpdateIntervalUnsupported);
         }
 
-        if dirty_region_settings != DirtyRegionSettings::Default
-            && !Self::is_dirty_region_supported()?
-        {
+        if dirty_region_settings != DirtyRegionSettings::Default && !Self::is_dirty_region_supported()? {
             return Err(Error::DirtyRegionUnsupported);
         }
 
@@ -206,8 +176,7 @@ impl GraphicsCaptureApi {
         let pixel_format = DirectXPixelFormat(color_format as i32);
 
         // Create frame pool
-        let frame_pool =
-            Direct3D11CaptureFramePool::Create(&direct3d_device, pixel_format, 1, item.Size()?)?;
+        let frame_pool = Direct3D11CaptureFramePool::Create(&direct3d_device, pixel_format, 1, item.Size()?)?;
         let frame_pool = Arc::new(frame_pool);
 
         // Create capture session
@@ -217,32 +186,30 @@ impl GraphicsCaptureApi {
         let halt = Arc::new(AtomicBool::new(false));
 
         // Set capture session closed event
-        let capture_closed_event_token = item.Closed(&TypedEventHandler::<
-            GraphicsCaptureItem,
-            IInspectable,
-        >::new({
-            // Init
-            let callback_closed = callback.clone();
-            let halt_closed = halt.clone();
-            let result_closed = result.clone();
+        let capture_closed_event_token =
+            item.Closed(&TypedEventHandler::<GraphicsCaptureItem, IInspectable>::new({
+                // Init
+                let callback_closed = callback.clone();
+                let halt_closed = halt.clone();
+                let result_closed = result.clone();
 
-            move |_, _| {
-                halt_closed.store(true, atomic::Ordering::Relaxed);
+                move |_, _| {
+                    halt_closed.store(true, atomic::Ordering::Relaxed);
 
-                // Notify the user that the capture session is closed.
-                let callback_closed = callback_closed.lock().on_closed();
-                if let Err(e) = callback_closed {
-                    *result_closed.lock() = Some(e);
+                    // Notify the user that the capture session is closed.
+                    let callback_closed = callback_closed.lock().on_closed();
+                    if let Err(e) = callback_closed {
+                        *result_closed.lock() = Some(e);
+                    }
+
+                    // Stop the message loop to allow the thread to exit gracefully.
+                    unsafe {
+                        PostThreadMessageW(thread_id, WM_QUIT, WPARAM::default(), LPARAM::default())?;
+                    };
+
+                    Result::Ok(())
                 }
-
-                // Stop the message loop to allow the thread to exit gracefully.
-                unsafe {
-                    PostThreadMessageW(thread_id, WM_QUIT, WPARAM::default(), LPARAM::default())?;
-                };
-
-                Result::Ok(())
-            }
-        }))?;
+            }))?;
 
         // Set frame pool frame arrived event
         let frame_arrived_event_token = frame_pool.FrameArrived(&TypedEventHandler::<
@@ -257,8 +224,7 @@ impl GraphicsCaptureApi {
             let result_frame_pool = result;
 
             let last_size = item.Size()?;
-            let last_size =
-                Arc::new((AtomicI32::new(last_size.Width), AtomicI32::new(last_size.Height)));
+            let last_size = Arc::new((AtomicI32::new(last_size.Width), AtomicI32::new(last_size.Height)));
             let callback_frame_pool = callback;
             let direct3d_device_recreate = SendDirectX::new(direct3d_device.clone());
 
@@ -282,8 +248,7 @@ impl GraphicsCaptureApi {
 
                 // Convert surface to texture
                 let frame_dxgi_interface = frame_surface.cast::<IDirect3DDxgiInterfaceAccess>()?;
-                let frame_texture =
-                    unsafe { frame_dxgi_interface.GetInterface::<ID3D11Texture2D>()? };
+                let frame_texture = unsafe { frame_dxgi_interface.GetInterface::<ID3D11Texture2D>()? };
 
                 // Get texture settings
                 let mut desc = D3D11_TEXTURE2D_DESC::default();
@@ -294,22 +259,13 @@ impl GraphicsCaptureApi {
                     || frame_content_size.Height != last_size.1.load(atomic::Ordering::Relaxed)
                 {
                     let direct3d_device_recreate = &direct3d_device_recreate;
-                    frame_pool_recreate.Recreate(
-                        &direct3d_device_recreate.0,
-                        pixel_format,
-                        1,
-                        frame_content_size,
-                    )?;
+                    frame_pool_recreate.Recreate(&direct3d_device_recreate.0, pixel_format, 1, frame_content_size)?;
 
                     last_size.0.store(frame_content_size.Width, atomic::Ordering::Relaxed);
                     last_size.1.store(frame_content_size.Height, atomic::Ordering::Relaxed);
 
                     return Ok(());
                 }
-
-                // Set width & height
-                let texture_width = desc.Width;
-                let texture_height = desc.Height;
 
                 // Create a frame
                 let mut frame = Frame::new(
@@ -318,8 +274,7 @@ impl GraphicsCaptureApi {
                     frame_surface,
                     frame_texture,
                     &context,
-                    texture_width,
-                    texture_height,
+                    desc,
                     color_format,
                     title_bar_height,
                 );
@@ -329,9 +284,7 @@ impl GraphicsCaptureApi {
                 let internal_capture_control = InternalCaptureControl::new(stop.clone());
 
                 // Send the frame to the callback struct
-                let result = callback_frame_pool
-                    .lock()
-                    .on_frame_arrived(&mut frame, internal_capture_control);
+                let result = callback_frame_pool.lock().on_frame_arrived(&mut frame, internal_capture_control);
 
                 // If the user signals to stop or an error occurs, halt the capture.
                 if stop.load(atomic::Ordering::Relaxed) || result.is_err() {
@@ -343,12 +296,7 @@ impl GraphicsCaptureApi {
 
                     // Stop the message loop to allow the thread to exit gracefully.
                     unsafe {
-                        PostThreadMessageW(
-                            thread_id,
-                            WM_QUIT,
-                            WPARAM::default(),
-                            LPARAM::default(),
-                        )?;
+                        PostThreadMessageW(thread_id, WM_QUIT, WPARAM::default(), LPARAM::default())?;
                     };
                 }
 
@@ -361,9 +309,7 @@ impl GraphicsCaptureApi {
                 match cursor_capture_settings {
                     CursorCaptureSettings::Default => (),
                     CursorCaptureSettings::WithCursor => session.SetIsCursorCaptureEnabled(true)?,
-                    CursorCaptureSettings::WithoutCursor => {
-                        session.SetIsCursorCaptureEnabled(false)?
-                    }
+                    CursorCaptureSettings::WithoutCursor => session.SetIsCursorCaptureEnabled(false)?,
                 };
             } else {
                 return Err(Error::CursorConfigUnsupported);
@@ -389,9 +335,7 @@ impl GraphicsCaptureApi {
                 match secondary_window_settings {
                     SecondaryWindowSettings::Default => (),
                     SecondaryWindowSettings::Include => session.SetIncludeSecondaryWindows(true)?,
-                    SecondaryWindowSettings::Exclude => {
-                        session.SetIncludeSecondaryWindows(false)?
-                    }
+                    SecondaryWindowSettings::Exclude => session.SetIncludeSecondaryWindows(false)?,
                 }
             } else {
                 return Err(Error::SecondaryWindowsUnsupported);
@@ -418,8 +362,9 @@ impl GraphicsCaptureApi {
                     DirtyRegionSettings::ReportOnly => {
                         session.SetDirtyRegionMode(GraphicsCaptureDirtyRegionMode::ReportOnly)?
                     }
-                    DirtyRegionSettings::ReportAndRender => session
-                        .SetDirtyRegionMode(GraphicsCaptureDirtyRegionMode::ReportAndRender)?,
+                    DirtyRegionSettings::ReportAndRender => {
+                        session.SetDirtyRegionMode(GraphicsCaptureDirtyRegionMode::ReportAndRender)?
+                    }
                 }
             } else {
                 return Err(Error::DirtyRegionUnsupported);
@@ -442,10 +387,10 @@ impl GraphicsCaptureApi {
 
     /// Starts the capture.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// Returns `Ok(())` if the capture started successfully, or an `Error` if
-    /// an error occurred.
+    /// - [`Error::AlreadyStarted`] when called more than once
+    /// - [`Error::WindowsError`] for failures starting the capture session
     #[inline]
     pub fn start_capture(&mut self) -> Result<(), Error> {
         if self.active {
@@ -488,30 +433,20 @@ impl GraphicsCaptureApi {
     /// # Returns
     ///
     /// Returns an `Arc<AtomicBool>` that can be used to check if the capture is halted.
-    #[must_use]
     #[inline]
+    #[must_use]
     pub fn halt_handle(&self) -> Arc<AtomicBool> {
         self.halt.clone()
     }
 
     /// Checks if the Windows Graphics Capture API is supported.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(true)` if the API is supported, `Ok(false)` otherwise, or an `Error` if the check fails.
     #[inline]
     pub fn is_supported() -> Result<bool, Error> {
-        Ok(ApiInformation::IsApiContractPresentByMajor(
-            &HSTRING::from("Windows.Foundation.UniversalApiContract"),
-            8,
-        )? && GraphicsCaptureSession::IsSupported()?)
+        Ok(ApiInformation::IsApiContractPresentByMajor(&HSTRING::from("Windows.Foundation.UniversalApiContract"), 8)?
+            && GraphicsCaptureSession::IsSupported()?)
     }
 
     /// Checks if the cursor capture settings can be changed.
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if toggling cursor capture is supported, `false` otherwise.
     #[inline]
     pub fn is_cursor_settings_supported() -> Result<bool, Error> {
         Ok(ApiInformation::IsPropertyPresent(
@@ -521,10 +456,6 @@ impl GraphicsCaptureApi {
     }
 
     /// Checks if the capture border settings can be changed.
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if toggling the capture border is supported, `false` otherwise.
     #[inline]
     pub fn is_border_settings_supported() -> Result<bool, Error> {
         Ok(ApiInformation::IsPropertyPresent(
@@ -534,10 +465,6 @@ impl GraphicsCaptureApi {
     }
 
     /// Checks if capturing secondary windows is supported.
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if capturing secondary windows is supported, `false` otherwise.
     #[inline]
     pub fn is_secondary_windows_supported() -> Result<bool, Error> {
         Ok(ApiInformation::IsPropertyPresent(
@@ -547,10 +474,6 @@ impl GraphicsCaptureApi {
     }
 
     /// Checks if setting a minimum update interval is supported.
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if setting a minimum update interval is supported, `false` otherwise.
     #[inline]
     pub fn is_minimum_update_interval_supported() -> Result<bool, Error> {
         Ok(ApiInformation::IsPropertyPresent(
@@ -560,10 +483,6 @@ impl GraphicsCaptureApi {
     }
 
     /// Checks if dirty region tracking is supported.
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if dirty region settings are supported, `false` otherwise.
     #[inline]
     pub fn is_dirty_region_supported() -> Result<bool, Error> {
         Ok(ApiInformation::IsPropertyPresent(

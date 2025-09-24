@@ -7,15 +7,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ::windows_capture::capture::{
-    CaptureControl, CaptureControlError, Context, GraphicsCaptureApiError,
-    GraphicsCaptureApiHandler,
+    CaptureControl, CaptureControlError, Context, GraphicsCaptureApiError, GraphicsCaptureApiHandler,
 };
 use ::windows_capture::frame::{self, Frame};
 use ::windows_capture::graphics_capture_api::InternalCaptureControl;
 use ::windows_capture::monitor::Monitor;
 use ::windows_capture::settings::{
-    ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
-    MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
+    ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings, MinimumUpdateIntervalSettings,
+    SecondaryWindowSettings, Settings,
 };
 use ::windows_capture::window::Window;
 use pyo3::exceptions::PyException;
@@ -33,24 +32,21 @@ fn windows_capture(m: &Bound<'_, PyModule>) -> PyResult<()> {
 /// Internal struct used to handle free threaded start.
 #[pyclass]
 pub struct NativeCaptureControl {
-    capture_control:
-        Option<CaptureControl<InnerNativeWindowsCapture, InnerNativeWindowsCaptureError>>,
+    capture_control: Option<CaptureControl<InnerNativeWindowsCapture, InnerNativeWindowsCaptureError>>,
 }
 
 impl NativeCaptureControl {
-    #[must_use]
     #[inline]
-    const fn new(
-        capture_control: CaptureControl<InnerNativeWindowsCapture, InnerNativeWindowsCaptureError>,
-    ) -> Self {
+    #[must_use]
+    const fn new(capture_control: CaptureControl<InnerNativeWindowsCapture, InnerNativeWindowsCaptureError>) -> Self {
         Self { capture_control: Some(capture_control) }
     }
 }
 
 #[pymethods]
 impl NativeCaptureControl {
-    #[must_use]
     #[inline]
+    #[must_use]
     pub fn is_finished(&self) -> bool {
         self.capture_control.as_ref().is_none_or(CaptureControl::is_finished)
     }
@@ -63,19 +59,15 @@ impl NativeCaptureControl {
                     Ok(()) => (),
                     Err(e) => {
                         if let CaptureControlError::GraphicsCaptureApiError(
-                            GraphicsCaptureApiError::FrameHandlerError(
-                                InnerNativeWindowsCaptureError::PythonError(ref e),
-                            ),
+                            GraphicsCaptureApiError::FrameHandlerError(InnerNativeWindowsCaptureError::PythonError(
+                                ref e,
+                            )),
                         ) = e
                         {
-                            return Err(PyException::new_err(format!(
-                                "Failed to join the capture thread: {e}",
-                            )));
+                            return Err(PyException::new_err(format!("Failed to join the capture thread: {e}",)));
                         }
 
-                        return Err(PyException::new_err(format!(
-                            "Failed to join the capture thread: {e}",
-                        )));
+                        return Err(PyException::new_err(format!("Failed to join the capture thread: {e}",)));
                     }
                 };
             }
@@ -94,19 +86,15 @@ impl NativeCaptureControl {
                     Ok(()) => (),
                     Err(e) => {
                         if let CaptureControlError::GraphicsCaptureApiError(
-                            GraphicsCaptureApiError::FrameHandlerError(
-                                InnerNativeWindowsCaptureError::PythonError(ref e),
-                            ),
+                            GraphicsCaptureApiError::FrameHandlerError(InnerNativeWindowsCaptureError::PythonError(
+                                ref e,
+                            )),
                         ) = e
                         {
-                            return Err(PyException::new_err(format!(
-                                "Failed to stop the capture thread: {e}",
-                            )));
+                            return Err(PyException::new_err(format!("Failed to stop the capture thread: {e}",)));
                         }
 
-                        return Err(PyException::new_err(format!(
-                            "Failed to stop the capture thread: {e}",
-                        )));
+                        return Err(PyException::new_err(format!("Failed to stop the capture thread: {e}",)));
                     }
                 };
             }
@@ -150,9 +138,7 @@ impl NativeWindowsCapture {
         window_name: Option<String>,
     ) -> PyResult<Self> {
         if window_name.is_some() && monitor_index.is_some() {
-            return Err(PyException::new_err(
-                "You can't specify both the monitor index and the window name",
-            ));
+            return Err(PyException::new_err("You can't specify both the monitor index and the window name"));
         }
 
         if window_name.is_none() && monitor_index.is_none() {
@@ -235,9 +221,7 @@ impl NativeWindowsCapture {
             let monitor = match Monitor::from_index(self.monitor_index.unwrap()) {
                 Ok(monitor) => monitor,
                 Err(e) => {
-                    return Err(PyException::new_err(format!(
-                        "Failed to get monitor from index: {e}"
-                    )));
+                    return Err(PyException::new_err(format!("Failed to get monitor from index: {e}")));
                 }
             };
 
@@ -290,18 +274,14 @@ impl NativeWindowsCapture {
             let capture_control = match InnerNativeWindowsCapture::start_free_threaded(settings) {
                 Ok(capture_control) => capture_control,
                 Err(e) => {
-                    if let GraphicsCaptureApiError::FrameHandlerError(
-                        InnerNativeWindowsCaptureError::PythonError(ref e),
-                    ) = e
+                    if let GraphicsCaptureApiError::FrameHandlerError(InnerNativeWindowsCaptureError::PythonError(
+                        ref e,
+                    )) = e
                     {
-                        return Err(PyException::new_err(format!(
-                            "Capture session threw an exception: {e}",
-                        )));
+                        return Err(PyException::new_err(format!("Capture session threw an exception: {e}",)));
                     }
 
-                    return Err(PyException::new_err(format!(
-                        "Capture session threw an exception: {e}",
-                    )));
+                    return Err(PyException::new_err(format!("Capture session threw an exception: {e}",)));
                 }
             };
 
@@ -310,9 +290,7 @@ impl NativeWindowsCapture {
             let monitor = match Monitor::from_index(self.monitor_index.unwrap()) {
                 Ok(monitor) => monitor,
                 Err(e) => {
-                    return Err(PyException::new_err(format!(
-                        "Failed to get monitor from index: {e}"
-                    )));
+                    return Err(PyException::new_err(format!("Failed to get monitor from index: {e}")));
                 }
             };
 
@@ -330,18 +308,14 @@ impl NativeWindowsCapture {
             let capture_control = match InnerNativeWindowsCapture::start_free_threaded(settings) {
                 Ok(capture_control) => capture_control,
                 Err(e) => {
-                    if let GraphicsCaptureApiError::FrameHandlerError(
-                        InnerNativeWindowsCaptureError::PythonError(ref e),
-                    ) = e
+                    if let GraphicsCaptureApiError::FrameHandlerError(InnerNativeWindowsCaptureError::PythonError(
+                        ref e,
+                    )) = e
                     {
-                        return Err(PyException::new_err(format!(
-                            "Capture session threw an exception: {e}",
-                        )));
+                        return Err(PyException::new_err(format!("Capture session threw an exception: {e}",)));
                     }
 
-                    return Err(PyException::new_err(format!(
-                        "Capture session threw an exception: {e}",
-                    )));
+                    return Err(PyException::new_err(format!("Capture session threw an exception: {e}",)));
                 }
             };
 
@@ -384,29 +358,16 @@ impl GraphicsCaptureApiHandler for InnerNativeWindowsCapture {
     ) -> Result<(), Self::Error> {
         let width = frame.width();
         let height = frame.height();
-        let timestamp =
-            frame.timestamp().map_err(InnerNativeWindowsCaptureError::WindowsApiError)?.Duration;
-        let mut buffer =
-            frame.buffer().map_err(InnerNativeWindowsCaptureError::FrameProcessError)?;
+        let timestamp = frame.timestamp().map_err(InnerNativeWindowsCaptureError::WindowsApiError)?.Duration;
+        let mut buffer = frame.buffer().map_err(InnerNativeWindowsCaptureError::FrameProcessError)?;
         let buffer = buffer.as_raw_buffer();
 
         Python::attach(|py| -> Result<(), Self::Error> {
             py.check_signals().map_err(InnerNativeWindowsCaptureError::PythonError)?;
 
-            let stop_list =
-                PyList::new(py, [false]).map_err(InnerNativeWindowsCaptureError::PythonError)?;
+            let stop_list = PyList::new(py, [false]).map_err(InnerNativeWindowsCaptureError::PythonError)?;
             self.on_frame_arrived_callback
-                .call1(
-                    py,
-                    (
-                        buffer.as_ptr() as isize,
-                        buffer.len(),
-                        width,
-                        height,
-                        stop_list.clone(),
-                        timestamp,
-                    ),
-                )
+                .call1(py, (buffer.as_ptr() as isize, buffer.len(), width, height, stop_list.clone(), timestamp))
                 .map_err(InnerNativeWindowsCaptureError::PythonError)?;
 
             if stop_list
@@ -426,8 +387,7 @@ impl GraphicsCaptureApiHandler for InnerNativeWindowsCapture {
 
     #[inline]
     fn on_closed(&mut self) -> Result<(), Self::Error> {
-        Python::attach(|py| self.on_closed.call0(py))
-            .map_err(InnerNativeWindowsCaptureError::PythonError)?;
+        Python::attach(|py| self.on_closed.call0(py)).map_err(InnerNativeWindowsCaptureError::PythonError)?;
 
         Ok(())
     }

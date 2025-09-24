@@ -5,16 +5,18 @@
 //! API. This library allows you to easily capture the screen of your
 //! Windows-based computer and use it for various purposes, such as creating
 //! instructional videos, taking screenshots, or recording your gameplay. With
-//! its intuitive interface and robust functionality, Windows-Capture is an
+//! its intuitive interface and robust functionality, Windows Capture is an
 //! excellent choice for anyone looking for a reliable and easy-to-use screen
 //! capturing solution.
 //!
 //! ## Features
 //!
 //! - Updates frames only when required
-//! - High performance.
+//! - High performance
 //! - Easy to use
-//! - Uses the latest screen capture API
+//! - Uses the latest Windows Graphics Capture API
+//! - Supports the DXGI Desktop Duplication API
+//! - Enhanced, hardware-accelerated video encoder with stable audio timing
 //!
 //! ## Installation
 //!
@@ -22,7 +24,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! windows-capture = "1.6.0-alpha.1"
+//! windows-capture = "2.0.0-alpha.1"
 //! ```
 //! Or run this command:
 //!
@@ -154,26 +156,35 @@
 //! ```
 #![warn(clippy::nursery)]
 #![warn(clippy::cargo)]
-#![warn(clippy::multiple_crate_versions)] // Should update as soon as possible
+#![warn(clippy::multiple_crate_versions)]
+#![warn(missing_docs)]
 
 /// Exported for the trait bounds
 pub use windows::Graphics::Capture::GraphicsCaptureItem;
 
-/// Contains the main capture functionality, including the `WindowsCaptureHandler` trait and related types.
+/// Contains the main capture functionality, including the
+/// [`crate::capture::GraphicsCaptureApiHandler`] trait and related types.
 pub mod capture;
 /// Internal module for Direct3D 11 related functionality.
-mod d3d11;
-/// Contains the encoder functionality for encoding captured frames.
+pub mod d3d11;
+/// Contains types and functions related to the DXGI Desktop Duplication API.
+pub mod dxgi_duplication_api;
+/// Contains the encoder functionality for encoding captured frames, including
+/// [`crate::encoder::VideoEncoder`].
 pub mod encoder;
-/// Contains the `Frame` struct and related types for representing captured frames.
+/// Contains the [`crate::frame::Frame`] struct and related types for representing captured frames.
 pub mod frame;
 /// Contains the types and functions related to the Graphics Capture API.
 pub mod graphics_capture_api;
-/// Contains the functionality for displaying a picker to select a window or screen to capture.
+/// Contains the functionality for displaying a picker to select a window or screen to capture:
+/// [`crate::graphics_capture_picker::GraphicsCapturePicker`].
 pub mod graphics_capture_picker;
-/// Contains the functionality for working with monitors and screen information.
+/// Contains functionality for working with monitors and screen information:
+/// [`crate::monitor::Monitor`].
 pub mod monitor;
-/// Contains the `Settings` struct and related types for configuring the capture settings.
+/// Contains the [`crate::settings::Settings`] struct and related types for configuring capture
+/// settings.
 pub mod settings;
-/// Contains the functionality for working with windows and capturing specific windows.
+/// Contains functionality for working with windows and capturing specific windows:
+/// [`crate::window::Window`].
 pub mod window;
