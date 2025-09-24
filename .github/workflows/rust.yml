@@ -3,7 +3,9 @@ name: Rust
 on:
   push:
     branches: ["main"]
+    branches: ["main"]
   pull_request:
+    branches: ["main"]
     branches: ["main"]
 
 env:
@@ -12,6 +14,10 @@ env:
 jobs:
   build:
     runs-on: windows-latest
+
+    strategy:
+      matrix:
+        target: [x86_64-pc-windows-msvc, i686-pc-windows-msvc]
 
     steps:
       - uses: actions/checkout@v3
