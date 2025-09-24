@@ -26,10 +26,11 @@
 //!     Ok(())
 //! }
 //! ```
-use std::slice;
+use std::path::Path;
+use std::{fs, io, slice};
 
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_CPU_ACCESS_READ, D3D11_CPU_ACCESS_WRITE, D3D11_MAP_READ_WRITE, D3D11_MAPPED_SUBRESOURCE,
+    D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CPU_ACCESS_WRITE, D3D11_MAP_READ_WRITE, D3D11_MAPPED_SUBRESOURCE,
     D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
@@ -43,13 +44,17 @@ use windows::Win32::Graphics::Dxgi::{
 use windows::core::Interface;
 
 use crate::d3d11::{StagingTexture, create_d3d_device};
-use crate::frame::FrameBuffer;
+use crate::encoder::ImageEncoder;
+use crate::frame::{FrameBuffer, ImageFormat};
 use crate::monitor::Monitor;
 use crate::settings::ColorFormat;
 
 /// Errors that can occur while using the DXGI Desktop Duplication API wrapper.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// The crop rectangle is invalid (start >= end on either axis).
+    #[error("Invalid crop size")]
+    InvalidSize,
     /// Failed to find a DXGI output that corresponds to the provided monitor.
     #[error("Failed to find DXGI output for the specified monitor")]
     OutputNotFound,
@@ -68,6 +73,16 @@ pub enum Error {
     /// Invalid or mismatched staging texture supplied to [`DuplicationFrame::buffer_with`].
     #[error("Invalid staging texture: {0}")]
     InvalidStagingTexture(&'static str),
+    /// Image encoding failed.
+    ///
+    /// Wraps [`crate::encoder::ImageEncoderError`].
+    #[error("Failed to encode the image buffer to image bytes with the specified format: {0}")]
+    ImageEncoderError(#[from] crate::encoder::ImageEncoderError),
+    /// An I/O error occurred while writing the image to disk.
+    ///
+    /// Wraps [`std::io::Error`].
+    #[error("I/O error: {0}")]
+    IoError(#[from] io::Error),
     /// Windows API error.
     #[error("Windows API error: {0}")]
     WindowsError(#[from] windows::core::Error),
@@ -286,7 +301,7 @@ impl<'a> DuplicationFrame<'a> {
     /// you can use [`crate::frame::FrameBuffer::as_nopadding_buffer`] to obtain a packed
     /// representation.
     #[inline]
-    pub fn buffer(&'_ mut self) -> Result<FrameBuffer<'_>, Error> {
+    pub fn buffer<'b>(&'b mut self) -> Result<FrameBuffer<'b>, Error> {
         // Staging texture settings
         let texture_desc = D3D11_TEXTURE2D_DESC {
             Width: self.texture_desc.Width,
@@ -335,6 +350,78 @@ impl<'a> DuplicationFrame<'a> {
             mapped_frame_data,
             self.texture_desc.Width,
             self.texture_desc.Height,
+            mapped.RowPitch,
+            mapped.DepthPitch,
+            color_format,
+        ))
+    }
+
+    /// Gets a cropped frame buffer of the duplication frame.
+    #[inline]
+    pub fn buffer_crop<'b>(
+        &'b mut self,
+        start_x: u32,
+        start_y: u32,
+        end_x: u32,
+        end_y: u32,
+    ) -> Result<FrameBuffer<'b>, Error> {
+        if start_x >= end_x || start_y >= end_y {
+            return Err(Error::InvalidSize);
+        }
+
+        let texture_width = end_x - start_x;
+        let texture_height = end_y - start_y;
+
+        // Staging texture settings for the cropped region
+        let texture_desc = D3D11_TEXTURE2D_DESC {
+            Width: texture_width,
+            Height: texture_height,
+            MipLevels: 1,
+            ArraySize: 1,
+            Format: self.texture_desc.Format,
+            SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+            Usage: D3D11_USAGE_STAGING,
+            BindFlags: 0,
+            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32 | D3D11_CPU_ACCESS_WRITE.0 as u32,
+            MiscFlags: 0,
+        };
+
+        // Create a CPU-readable staging texture of the crop size
+        let mut staging = None;
+        unsafe {
+            self.d3d_device.CreateTexture2D(&texture_desc, None, Some(&mut staging))?;
+        };
+        let staging = staging.unwrap();
+
+        // Define the source box to copy from the duplication texture
+        let src_box = D3D11_BOX { left: start_x, top: start_y, front: 0, right: end_x, bottom: end_y, back: 1 };
+
+        // Copy the selected region into the staging texture at (0,0)
+        unsafe {
+            self.d3d_device_context.CopySubresourceRegion(&staging, 0, 0, 0, 0, &self.texture, 0, Some(&src_box));
+        }
+
+        // Map the staging texture for CPU access
+        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+        unsafe {
+            self.d3d_device_context.Map(&staging, 0, D3D11_MAP_READ_WRITE, 0, Some(&mut mapped))?;
+        }
+
+        // SAFETY: staging remains alive for the scope of this function.
+        let mapped_frame_data =
+            unsafe { slice::from_raw_parts_mut(mapped.pData.cast(), (texture_height * mapped.RowPitch) as usize) };
+
+        let color_format = match self.texture_desc.Format {
+            DXGI_FORMAT_B8G8R8A8_UNORM => ColorFormat::Bgra8,
+            DXGI_FORMAT_R8G8B8A8_UNORM => ColorFormat::Rgba8,
+            DXGI_FORMAT_R16G16B16A16_FLOAT => ColorFormat::Rgba16F,
+            _ => return Err(Error::UnsupportedColorFormat(self.texture_desc.Format)),
+        };
+
+        Ok(FrameBuffer::new(
+            mapped_frame_data,
+            texture_width,
+            texture_height,
             mapped.RowPitch,
             mapped.DepthPitch,
             color_format,
@@ -390,6 +477,98 @@ impl<'a> DuplicationFrame<'a> {
             mapped.DepthPitch,
             color_format,
         ))
+    }
+
+    /// Advanced: cropped buffer using a preallocated staging texture.
+    /// The provided staging texture must be a D3D11_USAGE_STAGING 2D texture with CPU read/write access,
+    /// of the same format as the duplication frame, and large enough to contain the crop region.
+    #[inline]
+    pub fn buffer_crop_with<'s>(
+        &'s mut self,
+        staging: &'s mut StagingTexture,
+        start_x: u32,
+        start_y: u32,
+        end_x: u32,
+        end_y: u32,
+    ) -> Result<FrameBuffer<'s>, Error> {
+        if start_x >= end_x || start_y >= end_y {
+            return Err(Error::InvalidSize);
+        }
+
+        let crop_width = end_x - start_x;
+        let crop_height = end_y - start_y;
+
+        // Validate format and capacity
+        let sdesc = staging.desc();
+        if sdesc.Format != self.texture_desc.Format {
+            return Err(Error::InvalidStagingTexture("format must match the frame"));
+        }
+        if sdesc.Width < crop_width || sdesc.Height < crop_height {
+            return Err(Error::InvalidStagingTexture("staging texture too small for crop region"));
+        }
+
+        // Define the source region to copy
+        let src_box = D3D11_BOX { left: start_x, top: start_y, front: 0, right: end_x, bottom: end_y, back: 1 };
+
+        // Copy the selected region to the top-left of the staging texture
+        unsafe {
+            self.d3d_device_context.CopySubresourceRegion(
+                staging.texture(),
+                0,
+                0,
+                0,
+                0,
+                &self.texture,
+                0,
+                Some(&src_box),
+            );
+        }
+
+        // Map the staging texture
+        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+        unsafe {
+            self.d3d_device_context.Map(staging.texture(), 0, D3D11_MAP_READ_WRITE, 0, Some(&mut mapped))?;
+        }
+
+        // SAFETY: staging lives for 's and remains alive while the FrameBuffer is borrowed.
+        let mapped_frame_data =
+            unsafe { slice::from_raw_parts_mut(mapped.pData.cast(), (crop_height * mapped.RowPitch) as usize) };
+
+        let color_format = match self.texture_desc.Format {
+            DXGI_FORMAT_B8G8R8A8_UNORM => ColorFormat::Bgra8,
+            DXGI_FORMAT_R8G8B8A8_UNORM => ColorFormat::Rgba8,
+            DXGI_FORMAT_R16G16B16A16_FLOAT => ColorFormat::Rgba16F,
+            _ => return Err(Error::UnsupportedColorFormat(self.texture_desc.Format)),
+        };
+
+        Ok(FrameBuffer::new(
+            mapped_frame_data,
+            crop_width,
+            crop_height,
+            mapped.RowPitch,
+            mapped.DepthPitch,
+            color_format,
+        ))
+    }
+
+    /// Saves the frame buffer as an image to the specified path.
+    #[inline]
+    pub fn save_as_image<T: AsRef<Path>>(&mut self, path: T, format: ImageFormat) -> Result<(), Error> {
+        let frame_buffer = self.buffer()?;
+
+        let width = frame_buffer.width();
+        let height = frame_buffer.height();
+
+        let mut buffer = Vec::new();
+        let bytes = ImageEncoder::new(format, frame_buffer.color_format()).encode(
+            frame_buffer.as_nopadding_buffer(&mut buffer),
+            width,
+            height,
+        )?;
+
+        fs::write(path, bytes)?;
+
+        Ok(())
     }
 }
 

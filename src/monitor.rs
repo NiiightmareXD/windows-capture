@@ -413,7 +413,6 @@ impl Monitor {
     }
 
     /// Constructs a `Monitor` instance from a raw `HMONITOR` handle.
-    ///
     #[inline]
     #[must_use]
     pub const fn from_raw_hmonitor(monitor: *mut std::ffi::c_void) -> Self {

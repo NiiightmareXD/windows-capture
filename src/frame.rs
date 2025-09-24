@@ -394,6 +394,13 @@ impl<'a> FrameBuffer<'a> {
         self.depth_pitch
     }
 
+    /// Gets the color format of the frame buffer.
+    #[inline]
+    #[must_use]
+    pub const fn color_format(&self) -> ColorFormat {
+        self.color_format
+    }
+
     /// Checks if the buffer has padding.
     #[inline]
     #[must_use]
@@ -410,9 +417,10 @@ impl<'a> FrameBuffer<'a> {
 
     /// Gets the pixel data without padding.
     #[inline]
-    pub fn as_nopadding_buffer<'b>(&'b self, buffer: &'b mut Vec<u8>) -> Result<&'b [u8], Error> {
+    #[must_use]
+    pub fn as_nopadding_buffer<'b>(&'b self, buffer: &'b mut Vec<u8>) -> &'b [u8] {
         if !self.has_padding() {
-            return Ok(self.raw_buffer);
+            return self.raw_buffer;
         }
 
         let multiplier = match self.color_format {
@@ -441,7 +449,7 @@ impl<'a> FrameBuffer<'a> {
             }
         });
 
-        Ok(&buffer[0..frame_size])
+        &buffer[0..frame_size]
     }
 
     /// Saves the frame buffer as an image to the specified path.
@@ -452,7 +460,7 @@ impl<'a> FrameBuffer<'a> {
 
         let mut buffer = Vec::new();
         let bytes = ImageEncoder::new(format, self.color_format).encode(
-            self.as_nopadding_buffer(&mut buffer)?,
+            self.as_nopadding_buffer(&mut buffer),
             width,
             height,
         )?;
