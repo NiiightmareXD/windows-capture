@@ -280,8 +280,8 @@ impl Window {
         let mut rect = RECT::default();
         let result = unsafe { GetClientRect(self.window, &mut rect) };
         if result.is_ok() {
-            let styles = unsafe { GetWindowLongPtrW(self.window, GWL_STYLE) };
-            let ex_styles = unsafe { GetWindowLongPtrW(self.window, GWL_EXSTYLE) };
+            let styles = unsafe { GetWindowLongPtrW(self.window, GWL_STYLE) } as isize;
+            let ex_styles = unsafe { GetWindowLongPtrW(self.window, GWL_EXSTYLE) } as isize;
 
             if (ex_styles & isize::try_from(WS_EX_TOOLWINDOW.0).unwrap()) != 0 {
                 return false;
