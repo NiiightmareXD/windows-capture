@@ -32,7 +32,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{BOOL, HSTRING, Owned};
 
 use crate::monitor::Monitor;
-use crate::settings::{GraphicsCaptureItemWithDetails, TryIntoCaptureItemWithDetails};
+use crate::settings::GraphicsCaptureItemType;
 
 #[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
 /// Errors that can occur when querying or manipulating top-level windows via [`Window`].
@@ -371,15 +371,16 @@ impl Window {
     }
 }
 
-// Implements `TryIntoCaptureItemWithType` for `Window` to convert it to a `GraphicsCaptureItem`.
-impl TryIntoCaptureItemWithDetails for Window {
+impl TryInto<GraphicsCaptureItemType> for Window {
+    type Error = windows::core::Error;
+
     #[inline]
-    fn try_into_capture_item_with_details(self) -> Result<GraphicsCaptureItemWithDetails, windows::core::Error> {
+    fn try_into(self) -> Result<GraphicsCaptureItemType, Self::Error> {
         let window = HWND(self.as_raw_hwnd());
 
         let interop = windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
         let item = unsafe { interop.CreateForWindow(window)? };
 
-        Ok(GraphicsCaptureItemWithDetails::Window((item, self)))
+        Ok(GraphicsCaptureItemType::Window((item, self)))
     }
 }

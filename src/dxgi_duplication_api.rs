@@ -60,7 +60,7 @@ pub enum Error {
     OutputNotFound,
     /// AcquireNextFrame timed out without a new frame becoming available.
     #[error("AcquireNextFrame timed out")]
-    FrameTimeout,
+    Timeout,
     /// The duplication access was lost and must be recreated.
     #[error("Duplication access lost; the duplication must be recreated")]
     AccessLost,
@@ -199,10 +199,10 @@ impl DxgiDuplicationApi {
         // Acquire frame
         unsafe {
             match self.duplication.AcquireNextFrame(timeout_ms, &mut frame_info, &mut resource) {
-                Ok(_) => {}
+                Ok(()) => (),
                 Err(e) => {
                     if e.code() == DXGI_ERROR_WAIT_TIMEOUT {
-                        return Err(Error::FrameTimeout);
+                        return Err(Error::Timeout);
                     } else if e.code() == DXGI_ERROR_ACCESS_LOST {
                         return Err(Error::AccessLost);
                     } else {
@@ -211,8 +211,7 @@ impl DxgiDuplicationApi {
                 }
             }
         }
-
-        let resource = resource.expect("AcquireNextFrame succeeded but returned no resource");
+        let resource = resource.unwrap();
 
         // Convert the resource to an ID3D11Texture2D.
         let frame_texture: ID3D11Texture2D = resource.cast()?;
@@ -227,6 +226,7 @@ impl DxgiDuplicationApi {
             duplication: &self.duplication,
             texture: frame_texture,
             texture_desc: frame_desc,
+            frame_info,
         })
     }
 }
@@ -240,6 +240,7 @@ pub struct DuplicationFrame<'a> {
     duplication: &'a IDXGIOutputDuplication,
     texture: ID3D11Texture2D,
     texture_desc: D3D11_TEXTURE2D_DESC,
+    frame_info: DXGI_OUTDUPL_FRAME_INFO,
 }
 
 impl<'a> DuplicationFrame<'a> {
@@ -291,6 +292,13 @@ impl<'a> DuplicationFrame<'a> {
     #[must_use]
     pub const fn texture_desc(&self) -> &D3D11_TEXTURE2D_DESC {
         &self.texture_desc
+    }
+
+    /// Gets the frame information for the current frame.
+    #[inline]
+    #[must_use]
+    pub const fn frame_info(&self) -> &DXGI_OUTDUPL_FRAME_INFO {
+        &self.frame_info
     }
 
     /// Maps the internal frame into CPU accessible memory and returns a
@@ -554,14 +562,13 @@ impl<'a> DuplicationFrame<'a> {
     /// Saves the frame buffer as an image to the specified path.
     #[inline]
     pub fn save_as_image<T: AsRef<Path>>(&mut self, path: T, format: ImageFormat) -> Result<(), Error> {
-        let frame_buffer = self.buffer()?;
+        let mut frame_buffer = self.buffer()?;
 
         let width = frame_buffer.width();
         let height = frame_buffer.height();
 
-        let mut buffer = Vec::new();
-        let bytes = ImageEncoder::new(format, frame_buffer.color_format()).encode(
-            frame_buffer.as_nopadding_buffer(&mut buffer),
+        let bytes = ImageEncoder::new(format, frame_buffer.color_format())?.encode(
+            frame_buffer.as_raw_buffer(),
             width,
             height,
         )?;

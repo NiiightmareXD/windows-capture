@@ -31,7 +31,7 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 use windows::core::{BOOL, HSTRING, PCWSTR};
 
-use crate::settings::{GraphicsCaptureItemWithDetails, TryIntoCaptureItemWithDetails};
+use crate::settings::GraphicsCaptureItemType;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors that can occur when querying monitors or converting them into capture items.
@@ -437,16 +437,16 @@ impl Monitor {
     }
 }
 
-// Implements `TryIntoCaptureItemWithDetails` for `Monitor` to convert it into a
-// `crate::GraphicsCaptureItem`.
-impl TryIntoCaptureItemWithDetails for Monitor {
+impl TryInto<GraphicsCaptureItemType> for Monitor {
+    type Error = windows::core::Error;
+
     #[inline]
-    fn try_into_capture_item_with_details(self) -> Result<GraphicsCaptureItemWithDetails, windows::core::Error> {
+    fn try_into(self) -> Result<GraphicsCaptureItemType, Self::Error> {
         let monitor = HMONITOR(self.as_raw_hmonitor());
 
         let interop = windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
         let item = unsafe { interop.CreateForMonitor(monitor)? };
 
-        Ok(GraphicsCaptureItemWithDetails::Monitor((item, self)))
+        Ok(GraphicsCaptureItemType::Monitor((item, self)))
     }
 }

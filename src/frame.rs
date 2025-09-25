@@ -459,7 +459,7 @@ impl<'a> FrameBuffer<'a> {
         let height = self.height;
 
         let mut buffer = Vec::new();
-        let bytes = ImageEncoder::new(format, self.color_format).encode(
+        let bytes = ImageEncoder::new(format, self.color_format)?.encode(
             self.as_nopadding_buffer(&mut buffer),
             width,
             height,

@@ -19,7 +19,7 @@ use crate::capture::GraphicsCaptureApiHandler;
 use crate::d3d11::{self, SendDirectX, create_direct3d_device};
 use crate::frame::Frame;
 use crate::settings::{
-    ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings, GraphicsCaptureItemWithDetails,
+    ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings, GraphicsCaptureItemType,
     MinimumUpdateIntervalSettings, SecondaryWindowSettings,
 };
 
@@ -88,7 +88,7 @@ impl InternalCaptureControl {
 pub struct GraphicsCaptureApi {
     //// The [`windows::Graphics::Capture::GraphicsCaptureItem`] to be captured (e.g., a window or
     //// monitor).
-    item_with_details: GraphicsCaptureItemWithDetails,
+    item_with_details: GraphicsCaptureItemType,
     /// The Direct3D 11 device used for the capture.
     _d3d_device: ID3D11Device,
     //// The WinRT [`windows::Graphics::DirectX::Direct3D11::IDirect3DDevice`] wrapper.
@@ -119,7 +119,7 @@ impl GraphicsCaptureApi {
     pub fn new<T: GraphicsCaptureApiHandler<Error = E> + Send + 'static, E: Send + Sync + 'static>(
         d3d_device: ID3D11Device,
         d3d_device_context: ID3D11DeviceContext,
-        item_with_details: GraphicsCaptureItemWithDetails,
+        item_with_details: GraphicsCaptureItemType,
         callback: Arc<Mutex<T>>,
         cursor_capture_settings: CursorCaptureSettings,
         draw_border_settings: DrawBorderSettings,
@@ -159,15 +159,15 @@ impl GraphicsCaptureApi {
 
         // Pre-calculate the title bar height so each frame doesn't need to do it
         let title_bar_height = match item_with_details {
-            GraphicsCaptureItemWithDetails::Window((_, window)) => Some(window.title_bar_height()?),
-            GraphicsCaptureItemWithDetails::Monitor(_) => None,
-            GraphicsCaptureItemWithDetails::Unknown(_) => None,
+            GraphicsCaptureItemType::Window((_, window)) => Some(window.title_bar_height()?),
+            GraphicsCaptureItemType::Monitor(_) => None,
+            GraphicsCaptureItemType::Unknown(_) => None,
         };
 
         let item = match &item_with_details {
-            GraphicsCaptureItemWithDetails::Window((item, _)) => item,
-            GraphicsCaptureItemWithDetails::Monitor((item, _)) => item,
-            GraphicsCaptureItemWithDetails::Unknown((item, _)) => item,
+            GraphicsCaptureItemType::Window((item, _)) => item,
+            GraphicsCaptureItemType::Monitor((item, _)) => item,
+            GraphicsCaptureItemType::Unknown((item, _)) => item,
         };
 
         // Create DirectX devices
@@ -263,8 +263,6 @@ impl GraphicsCaptureApi {
 
                     last_size.0.store(frame_content_size.Width, atomic::Ordering::Relaxed);
                     last_size.1.store(frame_content_size.Height, atomic::Ordering::Relaxed);
-
-                    return Ok(());
                 }
 
                 // Create a frame
@@ -419,9 +417,9 @@ impl GraphicsCaptureApi {
         }
 
         let item = match &self.item_with_details {
-            GraphicsCaptureItemWithDetails::Window((item, _)) => item,
-            GraphicsCaptureItemWithDetails::Monitor((item, _)) => item,
-            GraphicsCaptureItemWithDetails::Unknown((item, _)) => item,
+            GraphicsCaptureItemType::Window((item, _)) => item,
+            GraphicsCaptureItemType::Monitor((item, _)) => item,
+            GraphicsCaptureItemType::Unknown((item, _)) => item,
         };
 
         item.RemoveClosed(self.capture_closed_event_token)
@@ -504,9 +502,9 @@ impl Drop for GraphicsCaptureApi {
         }
 
         let item = match &self.item_with_details {
-            GraphicsCaptureItemWithDetails::Window((item, _)) => item,
-            GraphicsCaptureItemWithDetails::Monitor((item, _)) => item,
-            GraphicsCaptureItemWithDetails::Unknown((item, _)) => item,
+            GraphicsCaptureItemType::Window((item, _)) => item,
+            GraphicsCaptureItemType::Monitor((item, _)) => item,
+            GraphicsCaptureItemType::Unknown((item, _)) => item,
         };
 
         let _ = item.RemoveClosed(self.capture_closed_event_token);

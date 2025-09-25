@@ -22,7 +22,7 @@ use windows_future::AsyncActionCompletedHandler;
 use crate::d3d11::{self, create_d3d_device};
 use crate::frame::Frame;
 use crate::graphics_capture_api::{self, GraphicsCaptureApi, InternalCaptureControl};
-use crate::settings::{Settings, TryIntoCaptureItemWithDetails};
+use crate::settings::{GraphicsCaptureItemType, Settings};
 
 #[derive(thiserror::Error, Debug)]
 /// Errors that can occur while controlling a running capture session via [`CaptureControl`].
@@ -245,7 +245,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
 
     /// Starts the capture and takes control of the current thread.
     #[inline]
-    fn start<T: TryIntoCaptureItemWithDetails>(
+    fn start<T: TryInto<GraphicsCaptureItemType>>(
         settings: Settings<Self::Flags, T>,
     ) -> Result<(), GraphicsCaptureApiError<Self::Error>>
     where
@@ -299,10 +299,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
         let mut capture = GraphicsCaptureApi::new(
             d3d_device,
             d3d_device_context,
-            settings
-                .item
-                .try_into_capture_item_with_details()
-                .map_err(|_| GraphicsCaptureApiError::ItemConvertFailed)?,
+            settings.item.try_into().map_err(|_| GraphicsCaptureApiError::ItemConvertFailed)?,
             callback,
             settings.cursor_capture_settings,
             settings.draw_border_settings,
@@ -362,7 +359,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
 
     /// Starts the capture without taking control of the current thread.
     #[inline]
-    fn start_free_threaded<T: TryIntoCaptureItemWithDetails + Send + 'static>(
+    fn start_free_threaded<T: TryInto<GraphicsCaptureItemType> + Send + 'static>(
         settings: Settings<Self::Flags, T>,
     ) -> Result<CaptureControl<Self, Self::Error>, GraphicsCaptureApiError<Self::Error>>
     where
@@ -423,10 +420,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
             let mut capture = GraphicsCaptureApi::new(
                 d3d_device,
                 d3d_device_context,
-                settings
-                    .item
-                    .try_into_capture_item_with_details()
-                    .map_err(|_| GraphicsCaptureApiError::ItemConvertFailed)?,
+                settings.item.try_into().map_err(|_| GraphicsCaptureApiError::ItemConvertFailed)?,
                 callback.clone(),
                 settings.cursor_capture_settings,
                 settings.draw_border_settings,

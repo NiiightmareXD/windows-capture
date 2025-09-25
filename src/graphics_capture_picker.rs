@@ -9,7 +9,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{Interface, w};
 use windows_future::AsyncStatus;
 
-use crate::settings::{GraphicsCaptureItemWithDetails, TryIntoCaptureItemWithDetails};
+use crate::settings::GraphicsCaptureItemType;
 
 #[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
 /// Errors that can occur while showing or interacting with the Graphics Capture Picker.
@@ -147,8 +147,11 @@ impl GraphicsCapturePicker {
     }
 }
 
-impl TryIntoCaptureItemWithDetails for PickedGraphicsCaptureItem {
-    fn try_into_capture_item_with_details(self) -> Result<GraphicsCaptureItemWithDetails, windows::core::Error> {
-        Ok(GraphicsCaptureItemWithDetails::Unknown((self.item, self._guard)))
+impl TryInto<GraphicsCaptureItemType> for PickedGraphicsCaptureItem {
+    type Error = windows::core::Error;
+
+    #[inline]
+    fn try_into(self) -> Result<GraphicsCaptureItemType, Self::Error> {
+        Ok(GraphicsCaptureItemType::Unknown((self.item, self._guard)))
     }
 }

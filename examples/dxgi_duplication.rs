@@ -1,27 +1,22 @@
-use windows_capture::dxgi_duplication_api::{DxgiDuplicationApi, Error as DupError};
+use windows_capture::dxgi_duplication_api::DxgiDuplicationApi;
 use windows_capture::frame::ImageFormat;
 use windows_capture::monitor::Monitor;
 
-fn main() {
-    // Capture the primary monitor using DXGI duplication API
-    let monitor = Monitor::primary().expect("No primary monitor found");
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Select a monitor (primary in this example)
+    let monitor = Monitor::primary()?;
 
-    // Create a new DXGI duplication API instance
-    let mut dxgi = DxgiDuplicationApi::new(monitor).expect("Failed to create DXGI duplication API");
+    // Create a duplication session for this monitor
+    let mut dup = DxgiDuplicationApi::new(monitor)?;
 
-    // Try to acquire the next frame with a timeout of 60 milliseconds
-    match dxgi.acquire_next_frame(60) {
-        Ok(mut frame) => {
-            let mut buf = frame.buffer().expect("Failed to get frame buffer");
-            buf.save_as_image("dxgi_duplication_capture.png", ImageFormat::Png).expect("Failed to save image");
-            println!("Saved dxgi_duplication_capture.png ({}x{})", buf.width(), buf.height());
-        }
-        Err(DupError::FrameTimeout) => {
-            eprintln!("No new frame available within the timeout period")
-        }
-        Err(DupError::AccessLost) => {
-            eprintln!("Duplication access lost")
-        }
-        Err(e) => eprintln!("Error: {}", e),
-    }
+    // Try to grab one frame within ~33ms (about 30 FPS budget)
+    let mut frame = dup.acquire_next_frame(33)?;
+
+    // Map the GPU image into CPU memory and save a PNG
+    // Note: The API could send an empty frame especially
+    // in the first few calls, you can check this by seeing if
+    // frame.frame_info().LastPresentTime is zero.
+    frame.save_as_image("dxgi_screenshot.png", ImageFormat::Png)?;
+
+    Ok(())
 }

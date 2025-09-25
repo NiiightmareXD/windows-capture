@@ -191,8 +191,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut frame = dup.acquire_next_frame(33)?;
 
     // Map the GPU image into CPU memory and save a PNG
-    let mut buffer = frame.buffer()?;
-    buffer.save_as_image("dxgi_screenshot.png", ImageFormat::Png)?;
+    // Note: The API could send an empty frame especially
+    // in the first few calls, you can check this by seeing if
+    // frame.frame_info().LastPresentTime is zero.
+    frame.save_as_image("dxgi_screenshot.png", ImageFormat::Png)?;
 
     Ok(())
 }

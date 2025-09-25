@@ -19,6 +19,7 @@
 - High performance
 - Easy to use
 - Uses the latest screen capture API
+- Optional DXGI Desktop Duplication capture pipeline
 
 ## Installation
 
@@ -29,6 +30,8 @@ pip install windows-capture
 ```
 
 ## Usage
+
+### Graphics Capture API
 
 ```python
 from windows_capture import WindowsCapture, Frame, InternalCaptureControl
@@ -62,6 +65,29 @@ def on_closed():
 
 
 capture.start()
+```
+
+### DXGI Desktop Duplication API
+
+```python
+from windows_capture import DxgiDuplicationSession
+
+# Create a duplication session for the primary monitor
+session = DxgiDuplicationSession()
+
+# Grab a frame (returns None if no frame is available within the timeout)
+frame = session.acquire_frame(timeout_ms=33)
+if frame is not None:
+    image = frame.to_numpy(copy=False)  # shape: (height, width, 4)
+
+    # Save as PNG using OpenCV
+    frame.save_as_image("duplication.png")
+
+# Recreate the session if DXGI reports access loss
+try:
+    session.acquire_frame()
+except RuntimeError:
+    session.recreate()
 ```
 
 ## Benchmark

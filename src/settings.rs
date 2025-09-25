@@ -12,7 +12,7 @@ use crate::window::Window;
 /// - [`Monitor`] for display monitors,
 /// - [`Window`] for top-level windows,
 /// - [`crate::graphics_capture_picker::HwndGuard`] for unknown HWND-based sources.
-pub enum GraphicsCaptureItemWithDetails {
+pub enum GraphicsCaptureItemType {
     /// A display monitor. Contains the [`GraphicsCaptureItem`] and its [`Monitor`] details.
     Monitor((GraphicsCaptureItem, Monitor)),
     /// An application window. Contains the [`GraphicsCaptureItem`] and its [`Window`] details.
@@ -21,13 +21,6 @@ pub enum GraphicsCaptureItemWithDetails {
     /// [`GraphicsCaptureItem`] and the associated
     /// [`crate::graphics_capture_picker::HwndGuard`].
     Unknown((GraphicsCaptureItem, HwndGuard)),
-}
-
-/// A trait for types that can be converted into a [`crate::GraphicsCaptureItem`].
-pub trait TryIntoCaptureItemWithDetails {
-    /// Attempts to convert the object into a [`crate::GraphicsCaptureItem`] and its corresponding
-    /// [`GraphicsCaptureItemWithDetails`] variant.
-    fn try_into_capture_item_with_details(self) -> Result<GraphicsCaptureItemWithDetails, windows::core::Error>;
 }
 
 /// Specifies the pixel format for the captured frame.
@@ -105,7 +98,7 @@ pub enum DirtyRegionSettings {
 
 /// Represents the settings for a screen capture session.
 #[derive(Eq, PartialEq, Clone, Debug)]
-pub struct Settings<Flags, T: TryIntoCaptureItemWithDetails> {
+pub struct Settings<Flags, T: TryInto<GraphicsCaptureItemType>> {
     /// The item to be captured (e.g., a `Window` or `Monitor`).
     pub(crate) item: T,
     /// Specifies whether the cursor should be captured.
@@ -124,7 +117,7 @@ pub struct Settings<Flags, T: TryIntoCaptureItemWithDetails> {
     pub(crate) flags: Flags,
 }
 
-impl<Flags, T: TryIntoCaptureItemWithDetails> Settings<Flags, T> {
+impl<Flags, T: TryInto<GraphicsCaptureItemType>> Settings<Flags, T> {
     /// Constructs a new [`Settings`] configuration.
     #[inline]
     #[must_use]

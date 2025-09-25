@@ -19,9 +19,7 @@ use windows::Media::MediaProperties::{
 };
 use windows::Media::Transcoding::MediaTranscoder;
 use windows::Security::Cryptography::CryptographicBuffer;
-use windows::Storage::Streams::{
-    Buffer, DataReader, IRandomAccessStream, InMemoryRandomAccessStream, InputStreamOptions,
-};
+use windows::Storage::Streams::{DataReader, IRandomAccessStream, InMemoryRandomAccessStream};
 use windows::Storage::{FileAccessMode, StorageFile};
 use windows::System::Threading::{ThreadPool, WorkItemHandler, WorkItemOptions, WorkItemPriority};
 use windows::Win32::Graphics::Direct3D11::{
@@ -40,7 +38,7 @@ use crate::settings::ColorFormat;
 type VideoFrameReceiver = Arc<Mutex<mpsc::Receiver<Option<(VideoEncoderSource, TimeSpan)>>>>;
 type AudioFrameReceiver = Arc<Mutex<mpsc::Receiver<Option<(AudioEncoderSource, TimeSpan)>>>>;
 
-#[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
+#[derive(thiserror::Error, Debug)]
 /// Errors that can occur when encoding raw buffers to images via [`ImageEncoder`].
 pub enum ImageEncoderError {
     /// The provided source pixel format is not supported for image encoding.
@@ -48,16 +46,21 @@ pub enum ImageEncoderError {
     /// This occurs for formats such as [`crate::settings::ColorFormat::Rgba16F`].
     #[error("This color format is not supported for saving as an image")]
     UnsupportedFormat,
-    /// A Windows Runtime/Win32 API call failed.
+    /// An I/O error occurred while writing the image to disk.
     ///
-    /// Wraps [`windows::core::Error`].
-    #[error("Windows API error: {0}")]
-    WindowsError(#[from] windows::core::Error),
+    /// Wraps [`std::io::Error`].
+    #[error("I/O error: {0}")]
+    IoError(#[from] std::io::Error),
     /// An integer conversion failed during buffer sizing or Windows API calls.
     ///
     /// Wraps [`std::num::TryFromIntError`].
     #[error("Integer conversion error: {0}")]
     IntConversionError(#[from] std::num::TryFromIntError),
+    /// A Windows Runtime/Win32 API call failed.
+    ///
+    /// Wraps [`windows::core::Error`].
+    #[error("Windows API error: {0}")]
+    WindowsError(#[from] windows::core::Error),
 }
 
 /// Encodes raw image buffers into encoded bytes for common formats.
@@ -83,22 +86,24 @@ pub enum ImageEncoderError {
 /// std::fs::write("example.png", png_bytes).unwrap();
 /// ```
 pub struct ImageEncoder {
-    format: ImageFormat,
     color_format: ColorFormat,
+    encoder: windows::core::GUID,
 }
 
 impl ImageEncoder {
     /// Constructs a new [`ImageEncoder`].
-    ///
-    /// - `format`: Target output [`ImageFormat`].
-    /// - `color_format`: Source pixel [`crate::settings::ColorFormat`].
-    ///
-    /// This constructor does not validate compatibility; validation happens in
-    /// [`ImageEncoder::encode`].
     #[inline]
-    #[must_use]
-    pub const fn new(format: ImageFormat, color_format: ColorFormat) -> Self {
-        Self { format, color_format }
+    pub fn new(format: ImageFormat, color_format: ColorFormat) -> Result<Self, ImageEncoderError> {
+        let encoder = match format {
+            ImageFormat::Jpeg => BitmapEncoder::JpegEncoderId()?,
+            ImageFormat::Png => BitmapEncoder::PngEncoderId()?,
+            ImageFormat::Gif => BitmapEncoder::GifEncoderId()?,
+            ImageFormat::Tiff => BitmapEncoder::TiffEncoderId()?,
+            ImageFormat::Bmp => BitmapEncoder::BmpEncoderId()?,
+            ImageFormat::JpegXr => BitmapEncoder::JpegXREncoderId()?,
+        };
+
+        Ok(Self { color_format, encoder })
     }
 
     /// Encodes the provided pixel buffer into the configured output [`ImageFormat`].
@@ -115,17 +120,9 @@ impl ImageEncoder {
     /// - [`ImageEncoderError::IntConversionError`] on integer conversion failures
     #[inline]
     pub fn encode(&self, image_buffer: &[u8], width: u32, height: u32) -> Result<Vec<u8>, ImageEncoderError> {
-        let encoder = match self.format {
-            ImageFormat::Jpeg => BitmapEncoder::JpegEncoderId()?,
-            ImageFormat::Png => BitmapEncoder::PngEncoderId()?,
-            ImageFormat::Gif => BitmapEncoder::GifEncoderId()?,
-            ImageFormat::Tiff => BitmapEncoder::TiffEncoderId()?,
-            ImageFormat::Bmp => BitmapEncoder::BmpEncoderId()?,
-            ImageFormat::JpegXr => BitmapEncoder::JpegXREncoderId()?,
-        };
-
         let stream = InMemoryRandomAccessStream::new()?;
-        let encoder = BitmapEncoder::CreateAsync(encoder, &stream)?.join()?;
+
+        let encoder = BitmapEncoder::CreateAsync(self.encoder, &stream)?.join()?;
 
         let pixelformat = match self.color_format {
             ColorFormat::Bgra8 => BitmapPixelFormat::Bgra8,
@@ -134,16 +131,15 @@ impl ImageEncoder {
         };
 
         encoder.SetPixelData(pixelformat, BitmapAlphaMode::Premultiplied, width, height, 1.0, 1.0, image_buffer)?;
-
         encoder.FlushAsync()?.join()?;
 
-        let buffer = Buffer::Create(u32::try_from(stream.Size()?)?)?;
-        stream.ReadAsync(&buffer, buffer.Capacity()?, InputStreamOptions::None)?.join()?;
+        let size = stream.Size()?;
+        let input = stream.GetInputStreamAt(0)?;
+        let reader = DataReader::CreateDataReader(&input)?;
+        reader.LoadAsync(size as u32)?.join()?;
 
-        let data_reader = DataReader::FromBuffer(&buffer)?;
-        let length = data_reader.UnconsumedBufferLength()?;
-        let mut bytes = vec![0u8; length as usize];
-        data_reader.ReadBytes(&mut bytes)?;
+        let mut bytes = vec![0u8; size as usize];
+        reader.ReadBytes(&mut bytes)?;
 
         Ok(bytes)
     }
