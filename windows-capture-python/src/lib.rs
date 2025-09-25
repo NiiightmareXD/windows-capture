@@ -3,12 +3,10 @@
 #![allow(clippy::redundant_pub_crate)]
 #![allow(clippy::multiple_crate_versions)] // Should update as soon as possible
 
+use std::os::raw::{c_char, c_int};
 use std::sync::Arc;
 use std::time::Duration;
-use std::{
-    os::raw::{c_char, c_int},
-    ptr, slice,
-};
+use std::{ptr, slice};
 
 use ::windows_capture::capture::{
     CaptureControl, CaptureControlError, Context, GraphicsCaptureApiError, GraphicsCaptureApiHandler,

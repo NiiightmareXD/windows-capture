@@ -80,6 +80,7 @@ pub enum ImageEncoderError {
 /// let bgra = vec![0u8; (width * height * 4) as usize];
 ///
 /// let png_bytes = ImageEncoder::new(ImageFormat::Png, ColorFormat::Bgra8)
+///     .unwrap()
 ///     .encode(&bgra, width, height)
 ///     .unwrap();
 ///

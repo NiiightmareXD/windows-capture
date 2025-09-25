@@ -488,8 +488,9 @@ impl<'a> DuplicationFrame<'a> {
     }
 
     /// Advanced: cropped buffer using a preallocated staging texture.
-    /// The provided staging texture must be a D3D11_USAGE_STAGING 2D texture with CPU read/write access,
-    /// of the same format as the duplication frame, and large enough to contain the crop region.
+    /// The provided staging texture must be a D3D11_USAGE_STAGING 2D texture with CPU read/write
+    /// access, of the same format as the duplication frame, and large enough to contain the
+    /// crop region.
     #[inline]
     pub fn buffer_crop_with<'s>(
         &'s mut self,
