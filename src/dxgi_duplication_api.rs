@@ -7,7 +7,7 @@
 //! # Example
 //! ```no_run
 //! use windows_capture::dxgi_duplication_api::DxgiDuplicationApi;
-//! use windows_capture::frame::ImageFormat;
+//! use windows_capture::encoder::ImageFormat;
 //! use windows_capture::monitor::Monitor;
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -44,8 +44,7 @@ use windows::Win32::Graphics::Dxgi::{
 use windows::core::Interface;
 
 use crate::d3d11::{StagingTexture, create_d3d_device};
-use crate::encoder::ImageEncoder;
-use crate::frame::{FrameBuffer, ImageFormat};
+use crate::encoder::{ImageEncoder, ImageFormat};
 use crate::monitor::Monitor;
 use crate::settings::ColorFormat;
 
@@ -309,7 +308,7 @@ impl<'a> DuplicationFrame<'a> {
     /// you can use [`crate::frame::FrameBuffer::as_nopadding_buffer`] to obtain a packed
     /// representation.
     #[inline]
-    pub fn buffer<'b>(&'b mut self) -> Result<FrameBuffer<'b>, Error> {
+    pub fn buffer<'b>(&'b mut self) -> Result<DuplicationFrameBuffer<'b>, Error> {
         // Staging texture settings
         let texture_desc = D3D11_TEXTURE2D_DESC {
             Width: self.texture_desc.Width,
@@ -354,7 +353,7 @@ impl<'a> DuplicationFrame<'a> {
             _ => return Err(Error::UnsupportedColorFormat(self.texture_desc.Format)),
         };
 
-        Ok(FrameBuffer::new(
+        Ok(DuplicationFrameBuffer::new(
             mapped_frame_data,
             self.texture_desc.Width,
             self.texture_desc.Height,
@@ -372,7 +371,7 @@ impl<'a> DuplicationFrame<'a> {
         start_y: u32,
         end_x: u32,
         end_y: u32,
-    ) -> Result<FrameBuffer<'b>, Error> {
+    ) -> Result<DuplicationFrameBuffer<'b>, Error> {
         if start_x >= end_x || start_y >= end_y {
             return Err(Error::InvalidSize);
         }
@@ -426,7 +425,7 @@ impl<'a> DuplicationFrame<'a> {
             _ => return Err(Error::UnsupportedColorFormat(self.texture_desc.Format)),
         };
 
-        Ok(FrameBuffer::new(
+        Ok(DuplicationFrameBuffer::new(
             mapped_frame_data,
             texture_width,
             texture_height,
@@ -442,7 +441,7 @@ impl<'a> DuplicationFrame<'a> {
     /// The `staging` texture must be a `D3D11_USAGE_STAGING` 2D texture with CPU read/write access,
     /// matching the frame’s width/height/format.
     #[inline]
-    pub fn buffer_with<'s>(&'s mut self, staging: &'s mut StagingTexture) -> Result<FrameBuffer<'s>, Error> {
+    pub fn buffer_with<'s>(&'s mut self, staging: &'s mut StagingTexture) -> Result<DuplicationFrameBuffer<'s>, Error> {
         // Validate geometry/format match.
         let sdesc = staging.desc();
 
@@ -477,7 +476,7 @@ impl<'a> DuplicationFrame<'a> {
             _ => return Err(Error::UnsupportedColorFormat(self.texture_desc.Format)),
         };
 
-        Ok(FrameBuffer::new(
+        Ok(DuplicationFrameBuffer::new(
             mapped_frame_data,
             self.texture_desc.Width,
             self.texture_desc.Height,
@@ -499,7 +498,7 @@ impl<'a> DuplicationFrame<'a> {
         start_y: u32,
         end_x: u32,
         end_y: u32,
-    ) -> Result<FrameBuffer<'s>, Error> {
+    ) -> Result<DuplicationFrameBuffer<'s>, Error> {
         if start_x >= end_x || start_y >= end_y {
             return Err(Error::InvalidSize);
         }
@@ -550,7 +549,7 @@ impl<'a> DuplicationFrame<'a> {
             _ => return Err(Error::UnsupportedColorFormat(self.texture_desc.Format)),
         };
 
-        Ok(FrameBuffer::new(
+        Ok(DuplicationFrameBuffer::new(
             mapped_frame_data,
             crop_width,
             crop_height,
@@ -586,5 +585,100 @@ impl Drop for DuplicationFrame<'_> {
         unsafe {
             let _ = self.duplication.ReleaseFrame();
         }
+    }
+}
+
+/// Represents a frame buffer containing pixel data.
+///
+/// # Example
+/// ```ignore
+/// // Get a frame from the capture session
+/// let mut buffer = frame.buffer()?;
+/// buffer.save_as_image("screenshot.png", ImageFormat::Png)?;
+/// ```
+pub struct DuplicationFrameBuffer<'a> {
+    raw_buffer: &'a mut [u8],
+    width: u32,
+    height: u32,
+    row_pitch: u32,
+    depth_pitch: u32,
+    color_format: ColorFormat,
+}
+
+impl<'a> DuplicationFrameBuffer<'a> {
+    /// Constructs a new `FrameBuffer`.
+    #[inline]
+    #[must_use]
+    pub const fn new(
+        raw_buffer: &'a mut [u8],
+        width: u32,
+        height: u32,
+        row_pitch: u32,
+        depth_pitch: u32,
+        color_format: ColorFormat,
+    ) -> Self {
+        Self { raw_buffer, width, height, row_pitch, depth_pitch, color_format }
+    }
+
+    /// Gets the width of the frame buffer.
+    #[inline]
+    #[must_use]
+    pub const fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// Gets the height of the frame buffer.
+    #[inline]
+    #[must_use]
+    pub const fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// Gets the row pitch of the frame buffer.
+    #[inline]
+    #[must_use]
+    pub const fn row_pitch(&self) -> u32 {
+        self.row_pitch
+    }
+
+    /// Gets the depth pitch of the frame buffer.
+    #[inline]
+    #[must_use]
+    pub const fn depth_pitch(&self) -> u32 {
+        self.depth_pitch
+    }
+
+    /// Gets the color format of the frame buffer.
+    #[inline]
+    #[must_use]
+    pub const fn color_format(&self) -> ColorFormat {
+        self.color_format
+    }
+
+    /// Checks if the buffer has padding.
+    #[inline]
+    #[must_use]
+    pub const fn has_padding(&self) -> bool {
+        self.width * 4 != self.row_pitch
+    }
+
+    /// Gets the raw pixel data, which may include padding.
+    #[inline]
+    #[must_use]
+    pub const fn as_raw_buffer(&mut self) -> &mut [u8] {
+        self.raw_buffer
+    }
+
+    /// Saves the frame buffer as an image to the specified path.
+    #[inline]
+    pub fn save_as_image<T: AsRef<Path>>(&mut self, path: T, format: ImageFormat) -> Result<(), Error> {
+        let width = self.width;
+        let height = self.height;
+
+        let bytes = ImageEncoder::new(format, self.color_format)?.encode(self.as_raw_buffer(), width, height)?;
+
+        fs::write(path, bytes)?;
+
+        Ok(())
     }
 }

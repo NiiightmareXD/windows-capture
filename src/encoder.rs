@@ -32,7 +32,7 @@ use windows::Win32::System::WinRT::Direct3D11::CreateDirect3D11SurfaceFromDXGISu
 use windows::core::{HSTRING, Interface};
 
 use crate::d3d11::SendDirectX;
-use crate::frame::{Frame, ImageFormat};
+use crate::frame::Frame;
 use crate::settings::ColorFormat;
 
 type VideoFrameReceiver = Arc<Mutex<mpsc::Receiver<Option<(VideoEncoderSource, TimeSpan)>>>>;
@@ -63,6 +63,23 @@ pub enum ImageEncoderError {
     WindowsError(#[from] windows::core::Error),
 }
 
+#[derive(Eq, PartialEq, Clone, Copy, Debug)]
+/// Supported output image formats for [`crate::encoder::ImageEncoder`].
+pub enum ImageFormat {
+    /// JPEG (lossy).
+    Jpeg,
+    /// PNG (lossless).
+    Png,
+    /// GIF (palette-based).
+    Gif,
+    /// TIFF (Tagged Image File Format).
+    Tiff,
+    /// BMP (Bitmap).
+    Bmp,
+    /// JPEG XR (HD Photo).
+    JpegXr,
+}
+
 /// Encodes raw image buffers into encoded bytes for common formats.
 ///
 /// Supports saving as PNG, JPEG, GIF, TIFF, BMP, and JPEG XR when the input
@@ -71,7 +88,7 @@ pub enum ImageEncoderError {
 /// # Example
 /// ```no_run
 /// use windows_capture::encoder::ImageEncoder;
-/// use windows_capture::frame::ImageFormat;
+/// use windows_capture::encoder::ImageFormat;
 /// use windows_capture::settings::ColorFormat;
 ///
 /// let width = 320u32;

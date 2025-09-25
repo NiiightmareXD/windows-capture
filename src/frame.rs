@@ -12,7 +12,7 @@ use windows::Win32::Graphics::Direct3D11::{
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT, DXGI_SAMPLE_DESC};
 
-use crate::encoder::{self, ImageEncoder};
+use crate::encoder::{self, ImageEncoder, ImageFormat};
 use crate::settings::ColorFormat;
 
 #[derive(thiserror::Error, Debug)]
@@ -42,23 +42,6 @@ pub enum Error {
     /// Wraps [`windows::core::Error`].
     #[error("Windows API error: {0}")]
     WindowsError(#[from] windows::core::Error),
-}
-
-#[derive(Eq, PartialEq, Clone, Copy, Debug)]
-/// Supported output image formats for [`crate::encoder::ImageEncoder`].
-pub enum ImageFormat {
-    /// JPEG (lossy).
-    Jpeg,
-    /// PNG (lossless).
-    Png,
-    /// GIF (palette-based).
-    Gif,
-    /// TIFF (Tagged Image File Format).
-    Tiff,
-    /// BMP (Bitmap).
-    Bmp,
-    /// JPEG XR (HD Photo).
-    JpegXr,
 }
 
 /// Represents a rectangular dirty region within a frame.

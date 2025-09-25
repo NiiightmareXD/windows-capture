@@ -1,5 +1,5 @@
 use windows_capture::dxgi_duplication_api::DxgiDuplicationApi;
-use windows_capture::frame::ImageFormat;
+use windows_capture::encoder::ImageFormat;
 use windows_capture::monitor::Monitor;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
