@@ -87,8 +87,7 @@ pub enum ImageFormat {
 ///
 /// # Example
 /// ```no_run
-/// use windows_capture::encoder::ImageEncoder;
-/// use windows_capture::encoder::ImageFormat;
+/// use windows_capture::encoder::{ImageEncoder, ImageFormat};
 /// use windows_capture::settings::ColorFormat;
 ///
 /// let width = 320u32;

@@ -69,7 +69,7 @@ pub enum Error {
     /// Unsupported color format encountered.
     #[error("Unsupported color format: {0:?}")]
     UnsupportedColorFormat(DXGI_FORMAT),
-    /// Invalid or mismatched staging texture supplied to [`DuplicationFrame::buffer_with`].
+    /// Invalid or mismatched staging texture supplied to [`DxgiDuplicationFrame::buffer_with`].
     #[error("Invalid staging texture: {0}")]
     InvalidStagingTexture(&'static str),
     /// Image encoding failed.
@@ -107,7 +107,6 @@ impl DxgiDuplicationApi {
     ///
     /// Internally creates a Direct3D 11 device and immediate context using the crate's d3d11
     /// module.
-    #[inline]
     pub fn new(monitor: Monitor) -> Result<Self, Error> {
         // Create D3D11 device and context.
         let (d3d_device, d3d_device_context) = create_d3d_device()?;
@@ -178,20 +177,25 @@ impl DxgiDuplicationApi {
     /// Acquires the next frame and updates the internal texture.
     ///
     /// This call will block up to `timeout_ms` milliseconds. If no new frame arrives within
-    /// the timeout, [`Error::FrameTimeout`] is returned. If duplication access is lost,
+    /// the timeout, [`Error::Timeout`] is returned. If duplication access is lost,
     /// [`Error::AccessLost`] is returned and a new duplication should be created via
     /// [`DxgiDuplicationApi::new`].
     ///
-    /// The returned [`DuplicationFrame`] allows you to map the current full desktop image via
-    /// [`DuplicationFrame::buffer`]. It contains the list of dirty rectangles reported for this
+    /// Main reasons for [`Error::AccessLost`] include:
+    /// - The display mode of the output changed (e.g. resolution or color format change).
+    /// - The user switched to a different desktop (e.g. via Ctrl+Alt+Del or Fast User Switching).
+    /// - Switch from DWM on, DWM off, or other full-screen application
+    ///
+    /// The returned [`DxgiDuplicationFrame`] allows you to map the current full desktop image via
+    /// [`DxgiDuplicationFrame::buffer`]. It contains the list of dirty rectangles reported for this
     /// frame.
     ///
     /// # Errors
-    /// - [`Error::FrameTimeout`] when no frame arrives within `timeout_ms`
+    /// - [`Error::Timeout`] when no frame arrives within `timeout_ms`
     /// - [`Error::AccessLost`] when duplication access is lost and must be recreated
     /// - [`Error::WindowsError`] for other Windows API failures during frame acquisition
     #[inline]
-    pub fn acquire_next_frame(&mut self, timeout_ms: u32) -> Result<DuplicationFrame<'_>, Error> {
+    pub fn acquire_next_frame(&mut self, timeout_ms: u32) -> Result<DxgiDuplicationFrame<'_>, Error> {
         let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
         let mut resource = None;
 
@@ -219,7 +223,7 @@ impl DxgiDuplicationApi {
         let mut frame_desc = D3D11_TEXTURE2D_DESC::default();
         unsafe { frame_texture.GetDesc(&mut frame_desc) };
 
-        Ok(DuplicationFrame {
+        Ok(DxgiDuplicationFrame {
             d3d_device: &self.d3d_device,
             d3d_device_context: &self.d3d_device_context,
             duplication: &self.duplication,
@@ -232,8 +236,8 @@ impl DxgiDuplicationApi {
 
 /// Represents a pre-assembled full desktop image for the current frame,
 /// backed by the internal GPU texture.
-/// Call [`DuplicationFrame::buffer`] to obtain a CPU-readable [`crate::frame::FrameBuffer`].
-pub struct DuplicationFrame<'a> {
+/// Call [`DxgiDuplicationFrame::buffer`] to obtain a CPU-readable [`crate::frame::FrameBuffer`].
+pub struct DxgiDuplicationFrame<'a> {
     d3d_device: &'a ID3D11Device,
     d3d_device_context: &'a ID3D11DeviceContext,
     duplication: &'a IDXGIOutputDuplication,
@@ -242,7 +246,7 @@ pub struct DuplicationFrame<'a> {
     frame_info: DXGI_OUTDUPL_FRAME_INFO,
 }
 
-impl<'a> DuplicationFrame<'a> {
+impl<'a> DxgiDuplicationFrame<'a> {
     /// Gets the width of the frame.
     #[inline]
     #[must_use]
@@ -308,7 +312,7 @@ impl<'a> DuplicationFrame<'a> {
     /// you can use [`crate::frame::FrameBuffer::as_nopadding_buffer`] to obtain a packed
     /// representation.
     #[inline]
-    pub fn buffer<'b>(&'b mut self) -> Result<DuplicationFrameBuffer<'b>, Error> {
+    pub fn buffer<'b>(&'b mut self) -> Result<DxgiDuplicationFrameBuffer<'b>, Error> {
         // Staging texture settings
         let texture_desc = D3D11_TEXTURE2D_DESC {
             Width: self.texture_desc.Width,
@@ -353,7 +357,7 @@ impl<'a> DuplicationFrame<'a> {
             _ => return Err(Error::UnsupportedColorFormat(self.texture_desc.Format)),
         };
 
-        Ok(DuplicationFrameBuffer::new(
+        Ok(DxgiDuplicationFrameBuffer::new(
             mapped_frame_data,
             self.texture_desc.Width,
             self.texture_desc.Height,
@@ -371,7 +375,7 @@ impl<'a> DuplicationFrame<'a> {
         start_y: u32,
         end_x: u32,
         end_y: u32,
-    ) -> Result<DuplicationFrameBuffer<'b>, Error> {
+    ) -> Result<DxgiDuplicationFrameBuffer<'b>, Error> {
         if start_x >= end_x || start_y >= end_y {
             return Err(Error::InvalidSize);
         }
@@ -425,7 +429,7 @@ impl<'a> DuplicationFrame<'a> {
             _ => return Err(Error::UnsupportedColorFormat(self.texture_desc.Format)),
         };
 
-        Ok(DuplicationFrameBuffer::new(
+        Ok(DxgiDuplicationFrameBuffer::new(
             mapped_frame_data,
             texture_width,
             texture_height,
@@ -441,15 +445,16 @@ impl<'a> DuplicationFrame<'a> {
     /// The `staging` texture must be a `D3D11_USAGE_STAGING` 2D texture with CPU read/write access,
     /// matching the frame’s width/height/format.
     #[inline]
-    pub fn buffer_with<'s>(&'s mut self, staging: &'s mut StagingTexture) -> Result<DuplicationFrameBuffer<'s>, Error> {
+    pub fn buffer_with<'s>(
+        &'s mut self,
+        staging: &'s mut StagingTexture,
+    ) -> Result<DxgiDuplicationFrameBuffer<'s>, Error> {
         // Validate geometry/format match.
-        let sdesc = staging.desc();
-
-        if sdesc.Width != self.texture_desc.Width || sdesc.Height != self.texture_desc.Height {
+        let desc = staging.desc();
+        if desc.Width != self.texture_desc.Width || desc.Height != self.texture_desc.Height {
             return Err(Error::InvalidStagingTexture("geometry must match the frame"));
         }
-
-        if sdesc.Format != self.texture_desc.Format {
+        if desc.Format != self.texture_desc.Format {
             return Err(Error::InvalidStagingTexture("format must match the frame"));
         }
 
@@ -476,7 +481,7 @@ impl<'a> DuplicationFrame<'a> {
             _ => return Err(Error::UnsupportedColorFormat(self.texture_desc.Format)),
         };
 
-        Ok(DuplicationFrameBuffer::new(
+        Ok(DxgiDuplicationFrameBuffer::new(
             mapped_frame_data,
             self.texture_desc.Width,
             self.texture_desc.Height,
@@ -498,7 +503,8 @@ impl<'a> DuplicationFrame<'a> {
         start_y: u32,
         end_x: u32,
         end_y: u32,
-    ) -> Result<DuplicationFrameBuffer<'s>, Error> {
+    ) -> Result<DxgiDuplicationFrameBuffer<'s>, Error> {
+        // Validate crop rectangle
         if start_x >= end_x || start_y >= end_y {
             return Err(Error::InvalidSize);
         }
@@ -507,11 +513,11 @@ impl<'a> DuplicationFrame<'a> {
         let crop_height = end_y - start_y;
 
         // Validate format and capacity
-        let sdesc = staging.desc();
-        if sdesc.Format != self.texture_desc.Format {
+        let desc = staging.desc();
+        if desc.Format != self.texture_desc.Format {
             return Err(Error::InvalidStagingTexture("format must match the frame"));
         }
-        if sdesc.Width < crop_width || sdesc.Height < crop_height {
+        if desc.Width < crop_width || desc.Height < crop_height {
             return Err(Error::InvalidStagingTexture("staging texture too small for crop region"));
         }
 
@@ -549,7 +555,7 @@ impl<'a> DuplicationFrame<'a> {
             _ => return Err(Error::UnsupportedColorFormat(self.texture_desc.Format)),
         };
 
-        Ok(DuplicationFrameBuffer::new(
+        Ok(DxgiDuplicationFrameBuffer::new(
             mapped_frame_data,
             crop_width,
             crop_height,
@@ -579,7 +585,7 @@ impl<'a> DuplicationFrame<'a> {
     }
 }
 
-impl Drop for DuplicationFrame<'_> {
+impl Drop for DxgiDuplicationFrame<'_> {
     fn drop(&mut self) {
         // Release the frame back to the duplication interface.
         unsafe {
@@ -596,7 +602,7 @@ impl Drop for DuplicationFrame<'_> {
 /// let mut buffer = frame.buffer()?;
 /// buffer.save_as_image("screenshot.png", ImageFormat::Png)?;
 /// ```
-pub struct DuplicationFrameBuffer<'a> {
+pub struct DxgiDuplicationFrameBuffer<'a> {
     raw_buffer: &'a mut [u8],
     width: u32,
     height: u32,
@@ -605,7 +611,7 @@ pub struct DuplicationFrameBuffer<'a> {
     color_format: ColorFormat,
 }
 
-impl<'a> DuplicationFrameBuffer<'a> {
+impl<'a> DxgiDuplicationFrameBuffer<'a> {
     /// Constructs a new `FrameBuffer`.
     #[inline]
     #[must_use]
