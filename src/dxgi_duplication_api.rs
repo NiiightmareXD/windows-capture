@@ -29,6 +29,7 @@
 use std::path::Path;
 use std::{fs, io, slice};
 
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CPU_ACCESS_WRITE, D3D11_MAP_READ_WRITE, D3D11_MAPPED_SUBRESOURCE,
     D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
@@ -100,6 +101,8 @@ pub struct DxgiDuplicationApi {
     duplication: IDXGIOutputDuplication,
     /// Description of the duplication, including format and dimensions.
     duplication_desc: DXGI_OUTDUPL_DESC,
+    /// Whether the internal staging texture is currently holding a frame.
+    is_holding_frame: bool,
 }
 
 impl DxgiDuplicationApi {
@@ -141,7 +144,7 @@ impl DxgiDuplicationApi {
         // Get the duplication description to determine the format for our internal texture.
         let duplication_desc = unsafe { duplication.GetDesc() };
 
-        Ok(Self { d3d_device, d3d_device_context, duplication, duplication_desc })
+        Ok(Self { d3d_device, d3d_device_context, duplication, duplication_desc, is_holding_frame: false })
     }
 
     /// Gets the underlying [`windows::Win32::Graphics::Direct3D11::ID3D11Device`] associated with
@@ -199,21 +202,26 @@ impl DxgiDuplicationApi {
         let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
         let mut resource = None;
 
+        // Release the previous frame if we were holding one
+        if self.is_holding_frame {
+            unsafe { self.duplication.ReleaseFrame() }?;
+        }
+
         // Acquire frame
-        unsafe {
-            match self.duplication.AcquireNextFrame(timeout_ms, &mut frame_info, &mut resource) {
-                Ok(()) => (),
-                Err(e) => {
-                    if e.code() == DXGI_ERROR_WAIT_TIMEOUT {
-                        return Err(Error::Timeout);
-                    } else if e.code() == DXGI_ERROR_ACCESS_LOST {
-                        return Err(Error::AccessLost);
-                    } else {
-                        return Err(Error::WindowsError(e));
-                    }
+        match unsafe { self.duplication.AcquireNextFrame(timeout_ms, &mut frame_info, &mut resource) } {
+            Ok(()) => (),
+            Err(e) => {
+                if e.code() == DXGI_ERROR_WAIT_TIMEOUT {
+                    return Err(Error::Timeout);
+                } else if e.code() == DXGI_ERROR_ACCESS_LOST {
+                    return Err(Error::AccessLost);
+                } else {
+                    return Err(Error::WindowsError(e));
                 }
             }
         }
+        self.is_holding_frame = true;
+
         let resource = resource.unwrap();
 
         // Convert the resource to an ID3D11Texture2D.
@@ -458,6 +466,12 @@ impl<'a> DxgiDuplicationFrame<'a> {
             return Err(Error::InvalidStagingTexture("format must match the frame"));
         }
 
+        // Unmap if was previously mapped
+        if staging.is_mapped() {
+            unsafe { self.d3d_device_context.Unmap(staging.texture(), 0) };
+            staging.set_mapped(false);
+        }
+
         // Copy the acquired duplication texture into the provided staging texture
         unsafe {
             self.d3d_device_context.CopyResource(staging.texture(), &self.texture);
@@ -468,6 +482,7 @@ impl<'a> DxgiDuplicationFrame<'a> {
         unsafe {
             self.d3d_device_context.Map(staging.texture(), 0, D3D11_MAP_READ_WRITE, 0, Some(&mut mapped))?;
         }
+        staging.set_mapped(true);
 
         // SAFETY: staging lives for 's and remains alive while the FrameBuffer is borrowed.
         let mapped_frame_data = unsafe {
@@ -521,6 +536,12 @@ impl<'a> DxgiDuplicationFrame<'a> {
             return Err(Error::InvalidStagingTexture("staging texture too small for crop region"));
         }
 
+        // Unmap if was previously mapped
+        if staging.is_mapped() {
+            unsafe { self.d3d_device_context.Unmap(staging.texture(), 0) };
+            staging.set_mapped(false);
+        }
+
         // Define the source region to copy
         let src_box = D3D11_BOX { left: start_x, top: start_y, front: 0, right: end_x, bottom: end_y, back: 1 };
 
@@ -543,6 +564,7 @@ impl<'a> DxgiDuplicationFrame<'a> {
         unsafe {
             self.d3d_device_context.Map(staging.texture(), 0, D3D11_MAP_READ_WRITE, 0, Some(&mut mapped))?;
         }
+        staging.set_mapped(true);
 
         // SAFETY: staging lives for 's and remains alive while the FrameBuffer is borrowed.
         let mapped_frame_data =
@@ -582,15 +604,6 @@ impl<'a> DxgiDuplicationFrame<'a> {
         fs::write(path, bytes)?;
 
         Ok(())
-    }
-}
-
-impl Drop for DxgiDuplicationFrame<'_> {
-    fn drop(&mut self) {
-        // Release the frame back to the duplication interface.
-        unsafe {
-            let _ = self.duplication.ReleaseFrame();
-        }
     }
 }
 
@@ -668,6 +681,43 @@ impl<'a> DxgiDuplicationFrameBuffer<'a> {
         self.width * 4 != self.row_pitch
     }
 
+    /// Gets the pixel data without padding.
+    #[inline]
+    #[must_use]
+    pub fn as_nopadding_buffer<'b>(&'b self, buffer: &'b mut Vec<u8>) -> &'b [u8] {
+        if !self.has_padding() {
+            return self.raw_buffer;
+        }
+
+        let multiplier = match self.color_format {
+            ColorFormat::Rgba16F => 8,
+            ColorFormat::Rgba8 => 4,
+            ColorFormat::Bgra8 => 4,
+        };
+
+        let frame_size = (self.width * self.height * multiplier) as usize;
+        if buffer.capacity() < frame_size {
+            buffer.resize(frame_size, 0);
+        }
+
+        let width_size = (self.width * multiplier) as usize;
+        let buffer_address = buffer.as_mut_ptr() as isize;
+        (0..self.height).into_par_iter().for_each(|y| {
+            let index = (y * self.row_pitch) as usize;
+            let ptr = buffer_address as *mut u8;
+
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    self.raw_buffer.as_ptr().add(index),
+                    ptr.add(y as usize * width_size),
+                    width_size,
+                );
+            }
+        });
+
+        &buffer[0..frame_size]
+    }
+
     /// Gets the raw pixel data, which may include padding.
     #[inline]
     #[must_use]
@@ -681,7 +731,12 @@ impl<'a> DxgiDuplicationFrameBuffer<'a> {
         let width = self.width;
         let height = self.height;
 
-        let bytes = ImageEncoder::new(format, self.color_format)?.encode(self.as_raw_buffer(), width, height)?;
+        let mut buffer = Vec::new();
+        let bytes = ImageEncoder::new(format, self.color_format)?.encode(
+            self.as_nopadding_buffer(&mut buffer),
+            width,
+            height,
+        )?;
 
         fs::write(path, bytes)?;
 

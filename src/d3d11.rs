@@ -108,6 +108,7 @@ pub fn create_direct3d_device(d3d_device: &ID3D11Device) -> Result<IDirect3DDevi
 pub struct StagingTexture {
     inner: ID3D11Texture2D,
     desc: D3D11_TEXTURE2D_DESC,
+    is_mapped: bool,
 }
 
 impl StagingTexture {
@@ -130,7 +131,7 @@ impl StagingTexture {
         unsafe {
             device.CreateTexture2D(&desc, None, Some(&mut tex))?;
         }
-        Ok(Self { inner: tex.unwrap(), desc })
+        Ok(Self { inner: tex.unwrap(), desc, is_mapped: false })
     }
 
     /// Gets the underlying [`windows::Win32::Graphics::Direct3D11::ID3D11Texture2D`].
@@ -147,7 +148,22 @@ impl StagingTexture {
         self.desc
     }
 
+    /// Checks if the texture is currently mapped.
+    #[inline]
+    #[must_use]
+    pub const fn is_mapped(&self) -> bool {
+        self.is_mapped
+    }
+
+    /// Marks the texture as mapped or unmapped.
+    #[inline]
+    pub const fn set_mapped(&mut self, mapped: bool) {
+        self.is_mapped = mapped;
+    }
+
     /// Validate an externally constructed texture as a CPU staging texture.
+    /// The texture must have been created with `D3D11_USAGE_STAGING` usage and
+    /// `D3D11_CPU_ACCESS_READ` and `D3D11_CPU_ACCESS_WRITE` CPU access flags.
     pub fn from_raw_checked(tex: ID3D11Texture2D) -> Option<Self> {
         let mut desc = D3D11_TEXTURE2D_DESC::default();
         unsafe { tex.GetDesc(&mut desc) };
@@ -158,6 +174,6 @@ impl StagingTexture {
             return None;
         }
 
-        Some(Self { inner: tex, desc })
+        Some(Self { inner: tex, desc, is_mapped: false })
     }
 }
