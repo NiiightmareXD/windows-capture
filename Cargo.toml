@@ -51,7 +51,7 @@ windows = { version = "0.62.0", features = [
     "Win32_UI_WindowsAndMessaging",
     "System_Threading",
 ] }
-windows-future = "0.3.0"
+windows-future = "0.3.1"
 
 # Mutex optimization
 parking_lot = "0.12.4"
