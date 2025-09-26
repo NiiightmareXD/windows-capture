@@ -24,7 +24,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! windows-capture = "2.0.0-alpha.3"
+//! windows-capture = "2.0.0-alpha.4"
 //! ```
 //! Or run this command:
 //!

@@ -12,7 +12,7 @@ use windows::Win32::Graphics::Direct3D11::{
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT, DXGI_SAMPLE_DESC};
 
-use crate::encoder::{self, ImageEncoder, ImageFormat};
+use crate::encoder::{self, ImageEncoder, ImageEncoderError, ImageEncoderPixelFormat, ImageFormat};
 use crate::settings::ColorFormat;
 
 #[derive(thiserror::Error, Debug)]
@@ -441,12 +441,15 @@ impl<'a> FrameBuffer<'a> {
         let width = self.width;
         let height = self.height;
 
+        let pixel_format = match self.color_format {
+            ColorFormat::Rgba8 => ImageEncoderPixelFormat::Rgba8,
+            ColorFormat::Bgra8 => ImageEncoderPixelFormat::Bgra8,
+            _ => return Err(ImageEncoderError::UnsupportedFormat.into()),
+        };
+
         let mut buffer = Vec::new();
-        let bytes = ImageEncoder::new(format, self.color_format)?.encode(
-            self.as_nopadding_buffer(&mut buffer),
-            width,
-            height,
-        )?;
+        let bytes =
+            ImageEncoder::new(format, pixel_format)?.encode(self.as_nopadding_buffer(&mut buffer), width, height)?;
 
         fs::write(path, bytes)?;
 
