@@ -63,7 +63,7 @@ rayon = "1.11.0"
 thiserror = "2.0.16"
 
 [dev-dependencies]
-clap = { version = "4.5.47", features = ["derive"] }
+clap = { version = "4.5.48", features = ["derive"] }
 ctrlc = "3.5.0"
 
 [package.metadata.docs.rs]
