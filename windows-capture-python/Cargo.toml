@@ -28,5 +28,5 @@ pyo3 = { version = "0.26.0", features = [
     "abi3-py39",
 ] }
 thiserror = "2.0.16"
-windows = "0.62.0"
+windows = "0.62.1"
 windows-capture = { path = ".." }
