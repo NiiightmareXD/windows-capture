@@ -98,15 +98,14 @@ pub enum ImageEncoderPixelFormat {
 ///
 /// # Example
 /// ```no_run
-/// use windows_capture::encoder::{ImageEncoder, ImageFormat};
-/// use windows_capture::settings::ColorFormat;
+/// use windows_capture::encoder::{ImageEncoder, ImageFormat, ImageEncoderPixelFormat};
 ///
 /// let width = 320u32;
 /// let height = 240u32;
 /// // BGRA8 buffer (e.g., from a frame)
 /// let bgra = vec![0u8; (width * height * 4) as usize];
 ///
-/// let png_bytes = ImageEncoder::new(ImageFormat::Png, ColorFormat::Bgra8)
+/// let png_bytes = ImageEncoder::new(ImageFormat::Png, ImageEncoderPixelFormat::Bgra8)
 ///     .unwrap()
 ///     .encode(&bgra, width, height)
 ///     .unwrap();
