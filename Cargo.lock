@@ -462,7 +462,7 @@ dependencies = [
 
 [[package]]
 name = "windows-capture"
-version = "2.0.0-alpha.5"
+version = "2.0.0-alpha.6"
 dependencies = [
  "clap",
  "ctrlc",
@@ -475,7 +475,7 @@ dependencies = [
 
 [[package]]
 name = "windows-capture-python"
-version = "2.0.0-alpha.5"
+version = "2.0.0-alpha.6"
 dependencies = [
  "pyo3",
  "thiserror",

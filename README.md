@@ -39,7 +39,7 @@ Add this dependency to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-windows-capture = "2.0.0-alpha.5"
+windows-capture = "2.0.0-alpha.6"
 ```
 
 Or run this command:

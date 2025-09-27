@@ -30,6 +30,7 @@ use std::path::Path;
 use std::{fs, io, slice};
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use windows::Win32::Foundation::E_ACCESSDENIED;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CPU_ACCESS_WRITE, D3D11_MAP_READ_WRITE, D3D11_MAPPED_SUBRESOURCE,
     D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
@@ -160,7 +161,16 @@ impl DxgiDuplicationApi {
         let output = output.cast::<IDXGIOutput6>()?;
 
         // Set the process to be per-monitor DPI aware to handle high-DPI monitors correctly.
-        unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)? };
+        match unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) } {
+            Ok(()) => (),
+            Err(e) => {
+                // returns E_ACCESSDENIED when the default API awareness mode for the process has already been set
+                // (via a previous API call or within the application manifest)
+                if e.code() != E_ACCESSDENIED {
+                    return Err(Error::WindowsError(e));
+                }
+            }
+        }
 
         // Create the duplication for this output using the supplied D3D11 device.
         let duplication = unsafe { output.DuplicateOutput(&d3d_device)? };
@@ -233,7 +243,16 @@ impl DxgiDuplicationApi {
         }
 
         // Set the process to be per-monitor DPI aware to handle high-DPI monitors correctly.
-        unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)? };
+        match unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) } {
+            Ok(()) => (),
+            Err(e) => {
+                // returns E_ACCESSDENIED when the default API awareness mode for the process has already been set
+                // (via a previous API call or within the application manifest)
+                if e.code() != E_ACCESSDENIED {
+                    return Err(Error::WindowsError(e));
+                }
+            }
+        }
 
         // Create the duplication for this output using the supplied D3D11 device.
         let duplication = unsafe { output.DuplicateOutput1(&d3d_device, 0, &supported_formats)? };
@@ -250,6 +269,45 @@ impl DxgiDuplicationApi {
             output,
             is_holding_frame: false,
         })
+    }
+
+    /// Recreates the duplication interface, mostly used after receiving an [`Error::AccessLost`]
+    /// error from [`DxgiDuplicationApi::acquire_next_frame`].
+    pub fn recreate(&mut self) -> Result<(), Error> {
+        self.duplication = unsafe { self.output.DuplicateOutput(&self.d3d_device)? };
+        self.duplication_desc = unsafe { self.duplication.GetDesc() };
+        self.is_holding_frame = false;
+
+        Ok(())
+    }
+
+    /// Recreates the duplication interface with a custom list of supported DXGI formats, mostly
+    /// used after receiving an [`Error::AccessLost`] error from
+    /// [`DxgiDuplicationApi::acquire_next_frame`].
+    pub fn recreate_options(&mut self, supported_formats: &[DxgiDuplicationFormat]) -> Result<(), Error> {
+        // Map the supported formats to DXGI_FORMAT values.
+        let mut supported_formats = supported_formats
+            .iter()
+            .map(|f| match f {
+                DxgiDuplicationFormat::Rgba16F => DXGI_FORMAT_R16G16B16A16_FLOAT,
+                DxgiDuplicationFormat::Rgb10A2 => DXGI_FORMAT_R10G10B10A2_UNORM,
+                DxgiDuplicationFormat::Rgb10XrA2 => DXGI_FORMAT_R10G10B10_XR_BIAS_A2_UNORM,
+                DxgiDuplicationFormat::Rgba8 => DXGI_FORMAT_R8G8B8A8_UNORM,
+                DxgiDuplicationFormat::Rgba8Srgb => DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+                DxgiDuplicationFormat::Bgra8 => DXGI_FORMAT_B8G8R8A8_UNORM,
+                DxgiDuplicationFormat::Bgra8Srgb => DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
+            })
+            .collect::<Vec<DXGI_FORMAT>>();
+
+        if !supported_formats.contains(&DXGI_FORMAT_B8G8R8A8_UNORM) {
+            supported_formats.push(DXGI_FORMAT_B8G8R8A8_UNORM);
+        }
+
+        self.duplication = unsafe { self.output.DuplicateOutput1(&self.d3d_device, 0, &supported_formats)? };
+        self.duplication_desc = unsafe { self.duplication.GetDesc() };
+        self.is_holding_frame = false;
+
+        Ok(())
     }
 
     /// Gets the underlying [`windows::Win32::Graphics::Direct3D11::ID3D11Device`] associated with
@@ -337,7 +395,7 @@ impl DxgiDuplicationApi {
     ///
     /// This call will block up to `timeout_ms` milliseconds. If no new frame arrives within
     /// the timeout, [`Error::Timeout`] is returned. If duplication access is lost,
-    /// [`Error::AccessLost`] is returned and a new duplication should be reconstructed.
+    /// [`Error::AccessLost`] is returned and a new duplication should be recreated.
     ///
     /// Main reasons for [`Error::AccessLost`] include:
     /// - The display mode of the output changed (e.g. resolution or color format change).

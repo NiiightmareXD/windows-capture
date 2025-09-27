@@ -98,7 +98,7 @@ pub enum ImageEncoderPixelFormat {
 ///
 /// # Example
 /// ```no_run
-/// use windows_capture::encoder::{ImageEncoder, ImageFormat, ImageEncoderPixelFormat};
+/// use windows_capture::encoder::{ImageEncoder, ImageEncoderPixelFormat, ImageFormat};
 ///
 /// let width = 320u32;
 /// let height = 240u32;
