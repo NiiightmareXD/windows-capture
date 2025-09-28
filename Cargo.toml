@@ -1,6 +1,6 @@
 [package]
 name = "windows-capture"
-version = "2.0.0-alpha.6"
+version = "2.0.0-alpha.7"
 authors = ["NiiightmareXD"]
 edition = "2024"
 description = "Fastest Windows Screen Capture Library For Rust 🔥"
@@ -20,7 +20,7 @@ resolver = "3"
 
 [dependencies]
 # Windows API
-windows = { version = "0.62.0", features = [
+windows = { version = "0.62.1", features = [
     "Foundation_Metadata",
     "Foundation",
     "Graphics_Capture",
@@ -51,7 +51,7 @@ windows = { version = "0.62.0", features = [
     "Win32_UI_WindowsAndMessaging",
     "System_Threading",
 ] }
-windows-future = "0.3.0"
+windows-future = "0.3.1"
 
 # Mutex optimization
 parking_lot = "0.12.4"
@@ -63,7 +63,7 @@ rayon = "1.11.0"
 thiserror = "2.0.16"
 
 [dev-dependencies]
-clap = { version = "4.5.47", features = ["derive"] }
+clap = { version = "4.5.48", features = ["derive"] }
 ctrlc = "3.5.0"
 
 [package.metadata.docs.rs]

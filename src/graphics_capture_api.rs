@@ -86,12 +86,12 @@ impl InternalCaptureControl {
 
 /// Manages a graphics capture session using the Windows Graphics Capture API.
 pub struct GraphicsCaptureApi {
-    //// The [`windows::Graphics::Capture::GraphicsCaptureItem`] to be captured (e.g., a window or
-    //// monitor).
+    /// The [`windows::Graphics::Capture::GraphicsCaptureItem`] to be captured (e.g., a window or
+    /// monitor).
     item_with_details: GraphicsCaptureItemType,
     /// The Direct3D 11 device used for the capture.
     _d3d_device: ID3D11Device,
-    //// The WinRT [`windows::Graphics::DirectX::Direct3D11::IDirect3DDevice`] wrapper.
+    /// The WinRT [`windows::Graphics::DirectX::Direct3D11::IDirect3DDevice`] wrapper.
     _direct3d_device: IDirect3DDevice,
     /// The Direct3D 11 device context.
     _d3d_device_context: ID3D11DeviceContext,

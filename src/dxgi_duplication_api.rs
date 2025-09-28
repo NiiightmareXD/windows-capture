@@ -273,18 +273,37 @@ impl DxgiDuplicationApi {
 
     /// Recreates the duplication interface, mostly used after receiving an [`Error::AccessLost`]
     /// error from [`DxgiDuplicationApi::acquire_next_frame`].
-    pub fn recreate(&mut self) -> Result<(), Error> {
-        self.duplication = unsafe { self.output.DuplicateOutput(&self.d3d_device)? };
-        self.duplication_desc = unsafe { self.duplication.GetDesc() };
-        self.is_holding_frame = false;
+    pub fn recreate(self) -> Result<Self, Error> {
+        let Self {
+            d3d_device,
+            d3d_device_context,
+            duplication,
+            duplication_desc: _,
+            dxgi_device,
+            output,
+            is_holding_frame: _,
+        } = self;
 
-        Ok(())
+        drop(duplication);
+
+        let duplication = unsafe { output.DuplicateOutput(&d3d_device)? };
+        let duplication_desc = unsafe { duplication.GetDesc() };
+
+        Ok(Self {
+            d3d_device,
+            d3d_device_context,
+            duplication,
+            duplication_desc,
+            dxgi_device,
+            output,
+            is_holding_frame: false,
+        })
     }
 
     /// Recreates the duplication interface with a custom list of supported DXGI formats, mostly
     /// used after receiving an [`Error::AccessLost`] error from
     /// [`DxgiDuplicationApi::acquire_next_frame`].
-    pub fn recreate_options(&mut self, supported_formats: &[DxgiDuplicationFormat]) -> Result<(), Error> {
+    pub fn recreate_options(self, supported_formats: &[DxgiDuplicationFormat]) -> Result<Self, Error> {
         // Map the supported formats to DXGI_FORMAT values.
         let mut supported_formats = supported_formats
             .iter()
@@ -303,11 +322,30 @@ impl DxgiDuplicationApi {
             supported_formats.push(DXGI_FORMAT_B8G8R8A8_UNORM);
         }
 
-        self.duplication = unsafe { self.output.DuplicateOutput1(&self.d3d_device, 0, &supported_formats)? };
-        self.duplication_desc = unsafe { self.duplication.GetDesc() };
-        self.is_holding_frame = false;
+        let Self {
+            d3d_device,
+            d3d_device_context,
+            duplication,
+            duplication_desc: _,
+            dxgi_device,
+            output,
+            is_holding_frame: _,
+        } = self;
 
-        Ok(())
+        drop(duplication);
+
+        let duplication = unsafe { output.DuplicateOutput1(&d3d_device, 0, &supported_formats)? };
+        let duplication_desc = unsafe { duplication.GetDesc() };
+
+        Ok(Self {
+            d3d_device,
+            d3d_device_context,
+            duplication,
+            duplication_desc,
+            dxgi_device,
+            output,
+            is_holding_frame: false,
+        })
     }
 
     /// Gets the underlying [`windows::Win32::Graphics::Direct3D11::ID3D11Device`] associated with
@@ -417,7 +455,17 @@ impl DxgiDuplicationApi {
 
         // Release the previous frame if we were holding one
         if self.is_holding_frame {
-            unsafe { self.duplication.ReleaseFrame() }?;
+            match unsafe { self.duplication.ReleaseFrame() } {
+                Ok(()) => (),
+                Err(e) => {
+                    if e.code() == DXGI_ERROR_ACCESS_LOST {
+                        return Err(Error::AccessLost);
+                    } else {
+                        return Err(Error::WindowsError(e));
+                    }
+                }
+            }
+            self.is_holding_frame = false;
         }
 
         // Acquire frame
