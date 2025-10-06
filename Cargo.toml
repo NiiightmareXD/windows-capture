@@ -54,7 +54,7 @@ windows = { version = "0.62.1", features = [
 windows-future = "0.3.1"
 
 # Mutex optimization
-parking_lot = "0.12.4"
+parking_lot = "0.12.5"
 
 # Multithreading
 rayon = "1.11.0"
