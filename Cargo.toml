@@ -20,7 +20,7 @@ resolver = "3"
 
 [dependencies]
 # Windows API
-windows = { version = "0.62.1", features = [
+windows = { version = "0.62.2", features = [
     "Foundation_Metadata",
     "Foundation",
     "Graphics_Capture",
