@@ -165,6 +165,8 @@ pub use windows::Graphics::Capture::GraphicsCaptureItem;
 /// Contains the main capture functionality, including the
 /// [`crate::capture::GraphicsCaptureApiHandler`] trait and related types.
 pub mod capture;
+/// Adds a new set of APIs. Use `windows_capture::capture_ext::*` to import them.
+pub mod capture_ext;
 /// Internal module for Direct3D 11 related functionality.
 pub mod d3d11;
 /// Contains types and functions related to the DXGI Desktop Duplication API.

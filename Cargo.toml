@@ -62,6 +62,8 @@ rayon = "1.11.0"
 # Error handling
 thiserror = "2.0.17"
 
+smart-default = "0.7.1"
+
 [dev-dependencies]
 clap = { version = "4.5.51", features = ["derive"] }
 ctrlc = "3.5.1"
