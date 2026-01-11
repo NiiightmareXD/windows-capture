@@ -62,6 +62,16 @@ pub trait CaptureExt {
         F: FnMut(&mut Frame, InternalCaptureControl) -> Result<(), E> + Send + 'static,
         E: Sync + Send + std::fmt::Debug + 'static;
 
+    /// Starts the capture session in a separate thread.
+    fn start_free_threaded<F, E>(
+        self,
+        capture_settings: CaptureSettings,
+        on_frame_arrived: F,
+    ) -> Result<(), GraphicsCaptureApiError<E>>
+    where
+        F: FnMut(&mut Frame, InternalCaptureControl) -> Result<(), E> + Send + 'static,
+        E: Sync + Send + std::fmt::Debug + 'static;
+
     /// Starts the capture session and blocks the current thread until the session ends.
     ///
     /// This method allows you to provide a dedicated handler for when the capture item
@@ -156,6 +166,20 @@ where
             (on_frame_arrived, on_closed),
         );
         SimpleCapture::start(settings)
+    }
+
+    fn start_free_threaded<F, E>(
+        self,
+        _capture_settings: CaptureSettings,
+        _on_frame_arrived: F,
+    ) -> Result<(), GraphicsCaptureApiError<E>>
+    where
+        F: FnMut(&mut Frame, InternalCaptureControl) -> Result<(), E> + Send + 'static,
+        E: Sync + Send + std::fmt::Debug + 'static,
+    {
+        unimplemented!(
+            "This is omitted for now because the underlying internal API (Capture::start_free_threaded(settings)) is currently causing compilation errors and requires further investigation."
+        )
     }
 }
 
