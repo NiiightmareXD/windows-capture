@@ -22,34 +22,6 @@ pub struct CaptureSettings {
     #[default(ColorFormat::Rgba8)]
     pub color_format: ColorFormat,
 }
-/// A trait for types that represent the outcome of a capture operation.
-///
-/// This trait provides a unified interface for capture results, supporting both
-/// fallible operations that return a `Result` and infallible ones that return `()`.
-pub trait CaptureResult<E> {
-    /// Converts the capture result into a `Result<(), E>`.
-    fn into_result(self) -> Result<(), E>;
-    /// Returns a successful capture result.
-    fn success() -> Self;
-}
-
-impl<E> CaptureResult<E> for Result<(), E> {
-    fn into_result(self) -> Result<(), E> {
-        self
-    }
-    fn success() -> Self {
-        Ok(())
-    }
-}
-
-impl CaptureResult<std::convert::Infallible> for () {
-    fn into_result(self) -> Result<(), std::convert::Infallible> {
-        Ok(())
-    }
-    fn success() -> Self {
-        ()
-    }
-}
 /// A trait that provides extension methods for starting a capture session.
 pub trait CaptureExt {
     /// Starts the capture session and blocks the current thread until the session ends.
@@ -71,26 +43,23 @@ pub trait CaptureExt {
     /// # use windows_capture::capture_ext::*;
     /// # use windows_capture::encoder::ImageFormat;
     /// # use windows_capture::window::Window;
-    /// # fn main() {
     /// let image_path = "target/frame.png";
     /// let item = Window::foreground().unwrap();
-    /// item.start(&Default::default(), move |frame, handle| {
+    /// item.start(Default::default(), move |frame, handle| {
     ///     frame.save_as_image(image_path, ImageFormat::Png).unwrap();
     ///     println!("Saved frame to {}", image_path);
     ///     handle.stop();
-    ///     // Return Err(...) to stop the capture and propagate the error
+    ///     Ok::<(), ()>(())
     /// })
     /// .unwrap();
-    /// # }
     /// ```
-    fn start<F, R, E>(
+    fn start<F, E>(
         self,
-        capture_settings: &CaptureSettings,
+        capture_settings: CaptureSettings,
         on_frame_arrived: F,
     ) -> Result<(), GraphicsCaptureApiError<E>>
     where
-        F: FnMut(&mut Frame, InternalCaptureControl) -> R + Send + 'static,
-        R: CaptureResult<E> + Send + 'static,
+        F: FnMut(&mut Frame, InternalCaptureControl) -> Result<(), E> + Send + 'static,
         E: Sync + Send + std::fmt::Debug + 'static;
 
     /// Starts the capture session and blocks the current thread until the session ends.
@@ -120,36 +89,32 @@ pub trait CaptureExt {
     /// # use windows_capture::capture_ext::*;
     /// # use windows_capture::encoder::ImageFormat;
     /// # use windows_capture::window::Window;
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let image_path = "target/frame.png";
     /// let item = Window::foreground().expect("No foreground window found");
     ///
     /// item.start_with_closed_handler(
-    ///     &Default::default(),
+    ///     Default::default(),
     ///     move |frame, handle| {
     ///         frame.save_as_image(image_path, ImageFormat::Png).unwrap();
     ///         println!("Saved frame to {image_path}");
     ///         handle.stop();
-    ///         // Return Err(...) to stop the capture and propagate the error
+    ///         Ok::<(), ()>(())
     ///     },
     ///     || {
     ///         println!("Capture item closed by the user.");
-    ///         // Return Err(...) to stop the capture and propagate the error
+    ///         Ok::<(), ()>(())
     ///     },
-    /// )?;
-    /// # Ok(())
-    /// # }
+    /// ).unwrap();
     /// ```
-    fn start_with_closed_handler<F, G, R, E>(
+    fn start_with_closed_handler<F, G, E>(
         self,
-        capture_settings: &CaptureSettings,
+        capture_settings: CaptureSettings,
         on_frame_arrived: F,
         on_closed: G,
     ) -> Result<(), GraphicsCaptureApiError<E>>
     where
-        F: FnMut(&mut Frame, InternalCaptureControl) -> R + Send + 'static,
-        G: FnMut() -> R + Send + 'static,
-        R: CaptureResult<E> + Send + 'static,
+        F: FnMut(&mut Frame, InternalCaptureControl) -> Result<(), E> + Send + 'static,
+        G: FnMut() -> Result<(), E> + Send + 'static,
         E: Sync + Send + std::fmt::Debug + 'static;
 }
 
@@ -157,29 +122,27 @@ impl<T> CaptureExt for T
 where
     T: TryInto<GraphicsCaptureItemType>,
 {
-    fn start<F, R, E>(
+    fn start<F, E>(
         self,
-        capture_settings: &CaptureSettings,
+        capture_settings: CaptureSettings,
         on_frame_arrived: F,
     ) -> Result<(), GraphicsCaptureApiError<E>>
     where
-        F: FnMut(&mut Frame, InternalCaptureControl) -> R + Send + 'static,
-        R: CaptureResult<E> + Send + 'static,
+        F: FnMut(&mut Frame, InternalCaptureControl) -> Result<(), E> + Send + 'static,
         E: Sync + Send + std::fmt::Debug + 'static,
     {
-        self.start_with_closed_handler(capture_settings, on_frame_arrived, || R::success())
+        self.start_with_closed_handler(capture_settings, on_frame_arrived, || Ok(()))
     }
 
-    fn start_with_closed_handler<F, G, R, E>(
+    fn start_with_closed_handler<F, G, E>(
         self,
-        capture_settings: &CaptureSettings,
+        capture_settings: CaptureSettings,
         on_frame_arrived: F,
         on_closed: G,
     ) -> Result<(), GraphicsCaptureApiError<E>>
     where
-        F: FnMut(&mut Frame, InternalCaptureControl) -> R + Send + 'static,
-        G: FnMut() -> R + Send + 'static,
-        R: CaptureResult<E> + Send + 'static,
+        F: FnMut(&mut Frame, InternalCaptureControl) -> Result<(), E> + Send + 'static,
+        G: FnMut() -> Result<(), E> + Send + 'static,
         E: Sync + Send + std::fmt::Debug + 'static,
     {
         let settings = Settings::new(
@@ -196,30 +159,23 @@ where
     }
 }
 
-struct SimpleCapture<F, G, R, E> {
+struct SimpleCapture<F, G, E> {
     on_frame_arrived: F,
     on_closed: G,
     _phantom: std::marker::PhantomData<E>,
-    _phantom2: std::marker::PhantomData<R>,
 }
 
-impl<F, G, R, E> GraphicsCaptureApiHandler for SimpleCapture<F, G, R, E>
+impl<F, G, E> GraphicsCaptureApiHandler for SimpleCapture<F, G, E>
 where
     E: Sync + Send + std::fmt::Debug + 'static,
-    F: FnMut(&mut Frame, InternalCaptureControl) -> R + Send + 'static,
-    G: FnMut() -> R + Send + 'static,
-    R: CaptureResult<E> + Send + 'static,
+    F: FnMut(&mut Frame, InternalCaptureControl) -> Result<(), E> + Send + 'static,
+    G: FnMut() -> Result<(), E> + Send + 'static,
 {
     type Flags = (F, G);
     type Error = E;
 
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
-        Ok(Self {
-            on_frame_arrived: ctx.flags.0,
-            on_closed: ctx.flags.1,
-            _phantom: Default::default(),
-            _phantom2: Default::default(),
-        })
+        Ok(Self { on_frame_arrived: ctx.flags.0, on_closed: ctx.flags.1, _phantom: Default::default() })
     }
 
     fn on_frame_arrived(
@@ -227,10 +183,10 @@ where
         frame: &mut Frame,
         capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
-        (self.on_frame_arrived)(frame, capture_control).into_result()
+        (self.on_frame_arrived)(frame, capture_control)
     }
 
     fn on_closed(&mut self) -> Result<(), Self::Error> {
-        (self.on_closed)().into_result()
+        (self.on_closed)()
     }
 }
