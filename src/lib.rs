@@ -162,6 +162,9 @@
 /// Exported for the trait bounds
 pub use windows::Graphics::Capture::GraphicsCaptureItem;
 
+/// Contains safe wrapper for WinRT initialization.
+pub(crate) mod winrt;
+
 /// Contains the main capture functionality, including the
 /// [`crate::capture::GraphicsCaptureApiHandler`] trait and related types.
 pub mod capture;
