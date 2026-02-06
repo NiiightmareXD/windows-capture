@@ -132,12 +132,13 @@ pub struct NativeWindowsCapture {
     dirty_region_settings: DirtyRegionSettings,
     monitor_index: Option<usize>,
     window_name: Option<String>,
+    window_hwnd: Option<isize>,
 }
 
 #[pymethods]
 impl NativeWindowsCapture {
     #[new]
-    #[pyo3(signature = (on_frame_arrived_callback, on_closed, cursor_capture=None, draw_border=None, secondary_window=None, minimum_update_interval=None, dirty_region=None, monitor_index=None, window_name=None))]
+    #[pyo3(signature = (on_frame_arrived_callback, on_closed, cursor_capture=None, draw_border=None, secondary_window=None, minimum_update_interval=None, dirty_region=None, monitor_index=None, window_name=None, window_hwnd=None))]
     #[inline]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -150,12 +151,22 @@ impl NativeWindowsCapture {
         dirty_region: Option<bool>,
         mut monitor_index: Option<usize>,
         window_name: Option<String>,
+        window_hwnd: Option<isize>,
     ) -> PyResult<Self> {
-        if window_name.is_some() && monitor_index.is_some() {
-            return Err(PyException::new_err("You can't specify both the monitor index and the window name"));
+        // Count how many capture targets are specified
+        let targets_specified = [monitor_index.is_some(), window_name.is_some(), window_hwnd.is_some()]
+            .iter()
+            .filter(|&&x| x)
+            .count();
+
+        if targets_specified > 1 {
+            return Err(PyException::new_err(
+                "You can only specify one of: monitor_index, window_name, or window_hwnd"
+            ));
         }
 
-        if window_name.is_none() && monitor_index.is_none() {
+        // Default to primary monitor if no target specified
+        if targets_specified == 0 {
             monitor_index = Some(1);
         }
 
@@ -198,14 +209,39 @@ impl NativeWindowsCapture {
             dirty_region_settings,
             monitor_index,
             window_name,
+            window_hwnd,
         })
     }
 
     /// Start capture.
     #[inline]
     pub fn start(&mut self) -> PyResult<()> {
-        if self.window_name.is_some() {
-            let window = match Window::from_contains_name(self.window_name.as_ref().unwrap()) {
+        if let Some(hwnd) = self.window_hwnd {
+            // Capture by window handle (HWND)
+            let window = Window::from_raw_hwnd(hwnd as *mut std::ffi::c_void);
+
+            let settings = Settings::new(
+                window,
+                self.cursor_capture,
+                self.draw_border,
+                SecondaryWindowSettings::Default,
+                MinimumUpdateIntervalSettings::Default,
+                DirtyRegionSettings::Default,
+                ColorFormat::Bgra8,
+                (self.on_frame_arrived_callback.clone(), self.on_closed.clone()),
+            );
+
+            match InnerNativeWindowsCapture::start(settings) {
+                Ok(()) => (),
+                Err(e) => {
+                    return Err(PyException::new_err(format!(
+                        "InnerNativeWindowsCapture::start threw an exception: {e}",
+                    )));
+                }
+            }
+        } else if let Some(ref name) = self.window_name {
+            // Capture by window name (substring match)
+            let window = match Window::from_contains_name(name) {
                 Ok(window) => window,
                 Err(e) => {
                     return Err(PyException::new_err(format!("Failed to find window: {e}")));
@@ -232,6 +268,7 @@ impl NativeWindowsCapture {
                 }
             }
         } else {
+            // Capture by monitor index
             let monitor = match Monitor::from_index(self.monitor_index.unwrap()) {
                 Ok(monitor) => monitor,
                 Err(e) => {
@@ -266,8 +303,39 @@ impl NativeWindowsCapture {
     /// Start capture on a dedicated thread.
     #[inline]
     pub fn start_free_threaded(&mut self) -> PyResult<NativeCaptureControl> {
-        let capture_control = if self.window_name.is_some() {
-            let window = match Window::from_contains_name(self.window_name.as_ref().unwrap()) {
+        let capture_control = if let Some(hwnd) = self.window_hwnd {
+            // Capture by window handle (HWND)
+            let window = Window::from_raw_hwnd(hwnd as *mut std::ffi::c_void);
+
+            let settings = Settings::new(
+                window,
+                self.cursor_capture,
+                self.draw_border,
+                SecondaryWindowSettings::Default,
+                MinimumUpdateIntervalSettings::Default,
+                DirtyRegionSettings::Default,
+                ColorFormat::Bgra8,
+                (self.on_frame_arrived_callback.clone(), self.on_closed.clone()),
+            );
+
+            let capture_control = match InnerNativeWindowsCapture::start_free_threaded(settings) {
+                Ok(capture_control) => capture_control,
+                Err(e) => {
+                    if let GraphicsCaptureApiError::FrameHandlerError(InnerNativeWindowsCaptureError::PythonError(
+                        ref e,
+                    )) = e
+                    {
+                        return Err(PyException::new_err(format!("Capture session threw an exception: {e}",)));
+                    }
+
+                    return Err(PyException::new_err(format!("Capture session threw an exception: {e}",)));
+                }
+            };
+
+            NativeCaptureControl::new(capture_control)
+        } else if let Some(ref name) = self.window_name {
+            // Capture by window name (substring match)
+            let window = match Window::from_contains_name(name) {
                 Ok(window) => window,
                 Err(e) => {
                     return Err(PyException::new_err(format!("Failed to find window: {e}")));
@@ -301,6 +369,7 @@ impl NativeWindowsCapture {
 
             NativeCaptureControl::new(capture_control)
         } else {
+            // Capture by monitor index
             let monitor = match Monitor::from_index(self.monitor_index.unwrap()) {
                 Ok(monitor) => monitor,
                 Err(e) => {
