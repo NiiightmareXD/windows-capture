@@ -981,6 +981,29 @@ impl VideoEncoder {
     }
 
     /// Constructs a new `VideoEncoder` that writes to the given stream.
+    ///
+    /// Unlike [`VideoEncoder::new`], which writes directly to a file, this constructor writes
+    /// encoded output into any [`IRandomAccessStream`]. Use [`InMemoryRandomAccessStream`] to
+    /// keep the encoded video in memory (e.g., for network streaming or further processing).
+    ///
+    /// # Example
+    /// ```no_run
+    /// use windows::Storage::Streams::InMemoryRandomAccessStream;
+    /// use windows::core::Interface;
+    /// use windows_capture::encoder::{
+    ///     AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder,
+    /// };
+    ///
+    /// let stream = InMemoryRandomAccessStream::new().unwrap();
+    ///
+    /// let encoder = VideoEncoder::new_from_stream(
+    ///     VideoSettingsBuilder::new(1920, 1080),
+    ///     AudioSettingsBuilder::new().disabled(true),
+    ///     ContainerSettingsBuilder::new(),
+    ///     stream.cast().unwrap(),
+    /// )
+    /// .unwrap();
+    /// ```
     #[inline]
     pub fn new_from_stream(
         video_settings: VideoSettingsBuilder,
