@@ -1,7 +1,6 @@
 use std::io::{self, Write};
 use std::time::Instant;
 
-use windows::Storage::Streams::IRandomAccessStream;
 use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::encoder::{AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder};
 use windows_capture::frame::Frame;
