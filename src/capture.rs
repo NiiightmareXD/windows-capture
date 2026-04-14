@@ -1,17 +1,15 @@
 use std::mem;
 use std::os::windows::prelude::AsRawHandle;
 use std::sync::atomic::{self, AtomicBool};
-use std::sync::{Arc, OnceLock, mpsc};
+use std::sync::{Arc, mpsc};
 use std::thread::{self, JoinHandle};
 
 use parking_lot::Mutex;
-use windows::Win32::Foundation::{HANDLE, LPARAM, S_FALSE, WPARAM};
+use windows::Win32::Foundation::{HANDLE, LPARAM, WPARAM};
 use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext};
-use windows::Win32::System::Com::CoIncrementMTAUsage;
 use windows::Win32::System::Threading::{GetCurrentThreadId, GetThreadId};
 use windows::Win32::System::WinRT::{
     CreateDispatcherQueueController, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, DispatcherQueueOptions,
-    RO_INIT_MULTITHREADED, RoInitialize,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetMessageW, MSG, PostQuitMessage, PostThreadMessageW, TranslateMessage, WM_QUIT,
@@ -23,6 +21,7 @@ use crate::d3d11::{self, create_d3d_device};
 use crate::frame::Frame;
 use crate::graphics_capture_api::{self, GraphicsCaptureApi, InternalCaptureControl};
 use crate::settings::{GraphicsCaptureItemType, Settings};
+use crate::winrt::WinRT;
 
 #[derive(thiserror::Error, Debug)]
 /// Errors that can occur while controlling a running capture session via [`CaptureControl`].
@@ -253,23 +252,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
         <Self as GraphicsCaptureApiHandler>::Flags: Send,
     {
         // Initialize WinRT
-        static INIT_MTA: OnceLock<()> = OnceLock::new();
-        INIT_MTA.get_or_init(|| {
-            unsafe {
-                CoIncrementMTAUsage().expect("Failed to increment MTA usage");
-            };
-        });
-
-        match unsafe { RoInitialize(RO_INIT_MULTITHREADED) } {
-            Ok(_) => (),
-            Err(e) => {
-                if e.code() == S_FALSE {
-                    // Already initialized
-                } else {
-                    return Err(GraphicsCaptureApiError::FailedToInitWinRT);
-                }
-            }
-        }
+        let _winrt = WinRT::new();
 
         // Create a dispatcher queue for the current thread
         let options = DispatcherQueueOptions {
@@ -345,9 +328,6 @@ pub trait GraphicsCaptureApiHandler: Sized {
         // Stop capture
         capture.stop_capture();
 
-        // Uninitialize WinRT
-        // unsafe { RoUninitialize() }; // Not sure if this is needed here
-
         // Check handler result
         let result = result.lock().take();
         if let Some(e) = result {
@@ -371,23 +351,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
 
         let thread_handle = thread::spawn(move || -> Result<(), GraphicsCaptureApiError<Self::Error>> {
             // Initialize WinRT
-            static INIT_MTA: OnceLock<()> = OnceLock::new();
-            INIT_MTA.get_or_init(|| {
-                unsafe {
-                    CoIncrementMTAUsage().expect("Failed to increment MTA usage");
-                };
-            });
-
-            match unsafe { RoInitialize(RO_INIT_MULTITHREADED) } {
-                Ok(_) => (),
-                Err(e) => {
-                    if e.code() == S_FALSE {
-                        // Already initialized
-                    } else {
-                        return Err(GraphicsCaptureApiError::FailedToInitWinRT);
-                    }
-                }
-            }
+            let _winrt = WinRT::new();
 
             // Create a dispatcher queue for the current thread
             let options = DispatcherQueueOptions {
@@ -474,9 +438,6 @@ pub trait GraphicsCaptureApiHandler: Sized {
 
             // Stop capture
             capture.stop_capture();
-
-            // Uninitialize WinRT
-            // unsafe { RoUninitialize() }; // Not sure if this is needed here
 
             // Check handler result
             let result = result.lock().take();
