@@ -154,14 +154,12 @@ impl NativeWindowsCapture {
         window_hwnd: Option<isize>,
     ) -> PyResult<Self> {
         // Count how many capture targets are specified
-        let targets_specified = [monitor_index.is_some(), window_name.is_some(), window_hwnd.is_some()]
-            .iter()
-            .filter(|&&x| x)
-            .count();
+        let targets_specified =
+            [monitor_index.is_some(), window_name.is_some(), window_hwnd.is_some()].iter().filter(|&&x| x).count();
 
         if targets_specified > 1 {
             return Err(PyException::new_err(
-                "You can only specify one of: monitor_index, window_name, or window_hwnd"
+                "You can only specify one of: monitor_index, window_name, or window_hwnd",
             ));
         }
 
@@ -722,7 +720,7 @@ impl NativeDxgiDuplicationFrame {
             Err(PyException::new_err("Failed to create memoryview for DXGI frame"))
         } else {
             let any = unsafe { Bound::from_owned_ptr(py, view) };
-            any.downcast_into().map_err(|e| e.into())
+            any.cast_into().map_err(|e| e.into())
         }
     }
 }
