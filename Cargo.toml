@@ -57,14 +57,14 @@ windows-future = "0.3.2"
 parking_lot = "0.12.5"
 
 # Multithreading
-rayon = "1.11.0"
+rayon = "1.12.0"
 
 # Error handling
-thiserror = "2.0.17"
+thiserror = "2.0.18"
 
 [dev-dependencies]
-clap = { version = "4.5.51", features = ["derive"] }
-ctrlc = "3.5.1"
+clap = { version = "4.6.0", features = ["derive"] }
+ctrlc = "3.5.2"
 
 [package.metadata.docs.rs]
 default-target = "x86_64-pc-windows-msvc"
