@@ -1,50 +1,45 @@
 //! Utilities for querying and working with top-level windows.
 //!
-//! Provides [`Window`] for finding and inspecting windows (title, process),
+//! Provides [`crate::window::Window`] for finding and inspecting windows (title, process),
 //! testing capture suitability, enumerating capturable windows, and converting
 //! a window into a graphics capture item.
 //!
 //! Common tasks include:
-//! - Getting the foreground window via [`Window::foreground`].
-//! - Finding by exact title via [`Window::from_name`].
-//! - Finding by substring via [`Window::from_contains_name`].
-//! - Enumerating capturable windows via [`Window::enumerate`].
-//! - Getting the owning process name via [`Window::process_name`].
-//! - Computing the title bar height via [`Window::title_bar_height`].
+//! - Getting the foreground window via [`crate::window::Window::foreground`].
+//! - Finding by exact title via [`crate::window::Window::from_name`].
+//! - Finding by substring via [`crate::window::Window::from_contains_name`].
+//! - Enumerating capturable windows via [`crate::window::Window::enumerate`].
+//! - Getting the owning process name via [`crate::window::Window::process_name`].
+//! - Computing the title bar height via [`crate::window::Window::title_bar_height`].
 //!
 //! To acquire a [`crate::GraphicsCaptureItem`] for a window, use
-//! [`crate::settings::TryIntoCaptureItemWithDetails`] for [`Window`].
+//! `TryInto<GraphicsCaptureItemType>` for [`crate::window::Window`].
 use std::ptr;
 
-use windows::Graphics::Capture::GraphicsCaptureItem;
-use windows::Win32::Foundation::{GetLastError, HWND, LPARAM, RECT, TRUE};
-use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
-use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONULL, MonitorFromWindow};
-use windows::Win32::System::ProcessStatus::GetModuleBaseNameW;
-use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
-use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
-use windows::Win32::UI::HiDpi::GetDpiForWindow;
-use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetForegroundWindow, GetWindowLongPtrW,
-    GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, WS_CHILD,
-    WS_EX_TOOLWINDOW,
+use crate::bindings::{
+    DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute, EnumWindows, FindWindowW, GWL_EXSTYLE, GWL_STYLE,
+    GetClientRect, GetDpiForWindow, GetForegroundWindow, GetModuleBaseNameW, GetWindowLongPtrW, GetWindowRect,
+    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, GraphicsCaptureItem, HWND,
+    IGraphicsCaptureItemInterop, IsWindowVisible, LPARAM, MONITOR_DEFAULTTONULL, MonitorFromWindow, OpenProcess,
+    PROCESS_QUERY_INFORMATION, PROCESS_VM_READ, RECT, WS_CHILD, WS_EX_TOOLWINDOW,
 };
-use windows::core::{BOOL, HSTRING, Owned};
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+use windows_core::{BOOL, HSTRING, PWSTR};
 
 use crate::monitor::Monitor;
 use crate::settings::GraphicsCaptureItemType;
 
 #[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
-/// Errors that can occur when querying or manipulating top-level windows via [`Window`].
+/// Errors that can occur when querying or manipulating top-level windows via [`crate::window::Window`].
 pub enum Error {
     /// There is no foreground window at the time of the call.
     ///
-    /// Returned by [`Window::foreground`].
+    /// Returned by [`crate::window::Window::foreground`].
     #[error("No active window found.")]
     NoActiveWindow,
     /// No window matched the provided title or substring.
     ///
-    /// Returned by [`Window::from_name`] and [`Window::from_contains_name`].
+    /// Returned by [`crate::window::Window::from_name`] and [`crate::window::Window::from_contains_name`].
     #[error("Failed to find a window with the name: {0}")]
     NotFound(String),
     /// Converting a UTF-16 Windows string to `String` failed.
@@ -52,9 +47,9 @@ pub enum Error {
     FailedToConvertWindowsString,
     /// A Windows API call returned an error.
     ///
-    /// Wraps [`windows::core::Error`].
+    /// Wraps [`windows_core::Error`].
     #[error("A Windows API call failed: {0}")]
-    WindowsError(#[from] windows::core::Error),
+    WindowsError(#[from] windows_core::Error),
 }
 
 /// Represents a window that can be captured.
@@ -87,7 +82,7 @@ impl Window {
     pub fn foreground() -> Result<Self, Error> {
         let window = unsafe { GetForegroundWindow() };
 
-        if window.is_invalid() {
+        if window.0.is_null() {
             return Err(Error::NoActiveWindow);
         }
 
@@ -103,9 +98,9 @@ impl Window {
     #[inline]
     pub fn from_name(title: &str) -> Result<Self, Error> {
         let hstring_title = HSTRING::from(title);
-        let window = unsafe { FindWindowW(None, &hstring_title)? };
+        let window = unsafe { FindWindowW(None, &hstring_title) };
 
-        if window.is_invalid() {
+        if window.0.is_null() {
             return Err(Error::NotFound(String::from(title)));
         }
 
@@ -148,7 +143,7 @@ impl Window {
         }
 
         let mut buf = vec![0u16; usize::try_from(len).unwrap() + 1];
-        let copied = unsafe { GetWindowTextW(self.window, &mut buf) };
+        let copied = unsafe { GetWindowTextW(self.window, PWSTR(buf.as_mut_ptr()), buf.len() as i32) };
         if copied == 0 {
             return Ok(String::new());
         }
@@ -169,7 +164,7 @@ impl Window {
         unsafe { GetWindowThreadProcessId(self.window, Some(&mut id)) };
 
         if id == 0 {
-            return Err(Error::WindowsError(unsafe { GetLastError().into() }));
+            return Err(Error::WindowsError(windows_core::Error::from_thread()));
         }
 
         Ok(id)
@@ -187,14 +182,24 @@ impl Window {
     pub fn process_name(&self) -> Result<String, Error> {
         let id = self.process_id()?;
 
-        let process = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, id) }?;
-        let process = unsafe { Owned::new(process) };
+        let process = unsafe { OpenProcess((PROCESS_QUERY_INFORMATION | PROCESS_VM_READ) as u32, false, id) };
+        if process.0.is_null() {
+            return Err(windows_core::Error::from_thread().into());
+        }
+        let process = unsafe { OwnedHandle::from_raw_handle(process.0) };
 
         let mut name = vec![0u16; 260];
-        let size = unsafe { GetModuleBaseNameW(*process, None, &mut name) };
+        let size = unsafe {
+            GetModuleBaseNameW(
+                crate::bindings::HANDLE(process.as_raw_handle()),
+                None,
+                PWSTR(name.as_mut_ptr()),
+                name.len() as u32,
+            )
+        };
 
         if size == 0 {
-            return Err(Error::WindowsError(unsafe { GetLastError().into() }));
+            return Err(Error::WindowsError(windows_core::Error::from_thread()));
         }
 
         let name =
@@ -212,9 +217,9 @@ impl Window {
     pub fn monitor(&self) -> Option<Monitor> {
         let window = self.window;
 
-        let monitor = unsafe { MonitorFromWindow(window, MONITOR_DEFAULTTONULL) };
+        let monitor = unsafe { MonitorFromWindow(window, MONITOR_DEFAULTTONULL as u32) };
 
-        if monitor.is_invalid() { None } else { Some(Monitor::from_raw_hmonitor(monitor.0)) }
+        if monitor.0.is_null() { None } else { Some(Monitor::from_raw_hmonitor(monitor.0)) }
     }
 
     /// Returns the bounding rectangle of the window in screen coordinates.
@@ -226,7 +231,7 @@ impl Window {
     pub fn rect(&self) -> Result<RECT, Error> {
         let mut rect = RECT::default();
         let result = unsafe { GetWindowRect(self.window, &mut rect) };
-        if result.is_ok() { Ok(rect) } else { Err(Error::WindowsError(unsafe { GetLastError().into() })) }
+        if result.as_bool() { Ok(rect) } else { Err(Error::WindowsError(windows_core::Error::from_thread())) }
     }
 
     /// Calculates the height of the window's title bar in pixels.
@@ -242,13 +247,14 @@ impl Window {
         unsafe {
             DwmGetWindowAttribute(
                 self.window,
-                DWMWA_EXTENDED_FRAME_BOUNDS,
+                DWMWA_EXTENDED_FRAME_BOUNDS as u32,
                 &mut window_rect as *mut RECT as *mut std::ffi::c_void,
                 std::mem::size_of::<RECT>() as u32,
             )
+            .ok()
         }?;
 
-        unsafe { GetClientRect(self.window, &mut client_rect) }?;
+        unsafe { GetClientRect(self.window, &mut client_rect).ok() }?;
 
         let window_height = window_rect.bottom - window_rect.top;
         let dpi = unsafe { GetDpiForWindow(self.window) };
@@ -272,7 +278,7 @@ impl Window {
         }
 
         let mut rect = RECT::default();
-        let result = unsafe { GetClientRect(self.window, &mut rect) };
+        let result = unsafe { GetClientRect(self.window, &mut rect).ok() };
         if result.is_ok() {
             #[cfg(target_pointer_width = "64")]
             let styles = unsafe { GetWindowLongPtrW(self.window, GWL_STYLE) };
@@ -284,10 +290,10 @@ impl Window {
             #[cfg(target_pointer_width = "32")]
             let ex_styles = unsafe { GetWindowLongPtrW(self.window, GWL_EXSTYLE) as isize };
 
-            if (ex_styles & isize::try_from(WS_EX_TOOLWINDOW.0).unwrap()) != 0 {
+            if (ex_styles & isize::try_from(WS_EX_TOOLWINDOW).unwrap()) != 0 {
                 return false;
             }
-            if (styles & isize::try_from(WS_CHILD.0).unwrap()) != 0 {
+            if (styles & isize::try_from(WS_CHILD).unwrap()) != 0 {
                 return false;
             }
         } else {
@@ -307,7 +313,7 @@ impl Window {
         let mut windows: Vec<Self> = Vec::new();
 
         unsafe {
-            EnumWindows(Some(Self::enum_windows_callback), LPARAM(ptr::addr_of_mut!(windows) as isize))?;
+            EnumWindows(Some(Self::enum_windows_callback), LPARAM(ptr::addr_of_mut!(windows) as isize)).ok()?;
         }
 
         Ok(windows)
@@ -333,7 +339,7 @@ impl Window {
         Ok(rect.bottom - rect.top)
     }
 
-    /// Constructs a `Window` instance from a raw `HWND` handle.
+    /// Constructs a `crate::window::Window` instance from a raw `HWND` handle.
     #[inline]
     #[must_use]
     pub const fn from_raw_hwnd(hwnd: *mut std::ffi::c_void) -> Self {
@@ -356,18 +362,18 @@ impl Window {
             windows.push(Self { window });
         }
 
-        TRUE
+        BOOL(1)
     }
 }
 
 impl TryInto<GraphicsCaptureItemType> for Window {
-    type Error = windows::core::Error;
+    type Error = windows_core::Error;
 
     #[inline]
     fn try_into(self) -> Result<GraphicsCaptureItemType, Self::Error> {
         let window = HWND(self.as_raw_hwnd());
 
-        let interop = windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
+        let interop = windows_core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
         let item = unsafe { interop.CreateForWindow(window)? };
 
         Ok(GraphicsCaptureItemType::Window((item, self)))

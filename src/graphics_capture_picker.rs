@@ -1,12 +1,10 @@
-use windows::Graphics::Capture::GraphicsCaptureItem;
-use windows::Win32::Foundation::{ERROR_CLASS_ALREADY_EXISTS, GetLastError, HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Shell::IInitializeWithWindow;
-use windows::Win32::UI::WindowsAndMessaging::{
-    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, MSG, PM_REMOVE,
-    PeekMessageW, RegisterClassExW, TranslateMessage, WM_DESTROY, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP, WS_VISIBLE,
+use crate::bindings::{
+    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
+    ERROR_CLASS_ALREADY_EXISTS, GetLastError, GetModuleHandleW, GraphicsCaptureItem, HWND, IInitializeWithWindow,
+    LPARAM, LRESULT, MSG, PM_REMOVE, PeekMessageW, RegisterClassExW, TranslateMessage, WM_DESTROY, WNDCLASSEXW, WPARAM,
+    WS_EX_TOOLWINDOW, WS_POPUP, WS_VISIBLE,
 };
-use windows::core::{Interface, w};
+use windows_core::{Interface, w};
 use windows_future::AsyncStatus;
 
 use crate::settings::GraphicsCaptureItemType;
@@ -17,7 +15,7 @@ use crate::winrt::WinRT;
 pub enum Error {
     /// An error returned by an underlying Windows API call.
     #[error("Windows API error: {0}")]
-    WindowsError(#[from] windows::core::Error),
+    WindowsError(#[from] windows_core::Error),
     /// The user canceled the picker (no item selected).
     #[error("User canceled the picker")]
     Canceled,
@@ -29,7 +27,7 @@ pub enum Error {
 /// Forwards unhandled messages to `DefWindowProcW`.
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
-        WM_DESTROY => LRESULT(0),
+        message if message == WM_DESTROY as u32 => LRESULT(0),
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
 }
@@ -46,7 +44,7 @@ impl Drop for HwndGuard {
         unsafe {
             let _ = DestroyWindow(self.hwnd);
             let mut msg = MSG::default();
-            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE as u32).as_bool() {
                 // We just remove them; no need to dispatch at this point.
             }
         }
@@ -63,7 +61,7 @@ pub struct PickedGraphicsCaptureItem {
 
 impl PickedGraphicsCaptureItem {
     /// Returns the size of the picked item as `(width, height)`.
-    pub fn size(&self) -> windows::core::Result<(i32, i32)> {
+    pub fn size(&self) -> windows_core::Result<(i32, i32)> {
         let size = self.item.Size()?;
         Ok((size.Width, size.Height))
     }
@@ -94,47 +92,53 @@ impl GraphicsCapturePicker {
         // disconnect it before capture starts.
         let winrt = WinRT::new()?;
 
-        let hinst = unsafe { GetModuleHandleW(None) }?;
+        let hinst = unsafe { GetModuleHandleW(None) };
+        if hinst.0.is_null() {
+            return Err(windows_core::Error::from_thread().into());
+        }
         let wc = WNDCLASSEXW {
             cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
-            style: CS_HREDRAW | CS_VREDRAW,
+            style: (CS_HREDRAW | CS_VREDRAW) as u32,
             lpfnWndProc: Some(wnd_proc),
-            hInstance: hinst.into(),
+            hInstance: hinst,
             lpszClassName: w!("windows-capture-picker-window"),
             ..Default::default()
         };
 
-        if unsafe { RegisterClassExW(&wc) } == 0 {
+        if unsafe { RegisterClassExW(&wc) }.0 == 0 {
             let err = unsafe { GetLastError() };
-            if err != ERROR_CLASS_ALREADY_EXISTS {
-                return Err(Error::WindowsError(err.into()));
+            if err != ERROR_CLASS_ALREADY_EXISTS as u32 {
+                return Err(Error::WindowsError(windows_core::WIN32_ERROR(err).into()));
             }
         }
 
         let hwnd = unsafe {
             CreateWindowExW(
-                WS_EX_TOOLWINDOW,
+                WS_EX_TOOLWINDOW as u32,
                 w!("windows-capture-picker-window"),
                 w!("Windows Capture Picker"),
-                WS_POPUP | WS_VISIBLE,
+                WS_POPUP | WS_VISIBLE as u32,
                 -69000,
                 -69000,
                 0,
                 0,
                 None,
                 None,
-                Some(hinst.into()),
+                Some(hinst),
                 None,
             )
-        }?;
+        };
+        if hwnd.0.is_null() {
+            return Err(windows_core::Error::from_thread().into());
+        }
 
         // Construct the guard immediately so the hidden window is also cleaned
         // up when picker initialization, selection, or result retrieval fails.
         let guard = HwndGuard { hwnd, _winrt: winrt };
 
-        let picker = windows::Graphics::Capture::GraphicsCapturePicker::new()?;
+        let picker = crate::bindings::GraphicsCapturePicker::new()?;
         let initialize_with_window: IInitializeWithWindow = picker.cast()?;
-        unsafe { initialize_with_window.Initialize(guard.hwnd) }?;
+        unsafe { initialize_with_window.Initialize(guard.hwnd).ok() }?;
 
         let op = picker.PickSingleItemAsync()?;
 
@@ -142,7 +146,7 @@ impl GraphicsCapturePicker {
             match op.Status()? {
                 AsyncStatus::Started => unsafe {
                     let mut msg = MSG::default();
-                    while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE as u32).as_bool() {
                         // Normal UI pump while the picker is up
                         let _ = TranslateMessage(&msg);
                         DispatchMessageW(&msg);
@@ -162,7 +166,7 @@ impl GraphicsCapturePicker {
 }
 
 impl TryInto<GraphicsCaptureItemType> for PickedGraphicsCaptureItem {
-    type Error = windows::core::Error;
+    type Error = windows_core::Error;
 
     #[inline]
     fn try_into(self) -> Result<GraphicsCaptureItemType, Self::Error> {

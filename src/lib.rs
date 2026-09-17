@@ -160,8 +160,22 @@
 #![warn(clippy::multiple_crate_versions)]
 #![warn(missing_docs)]
 
+#[allow(
+    non_snake_case, non_camel_case_types, non_upper_case_globals, dead_code, missing_docs,
+    clippy::all, clippy::pedantic, clippy::nursery, clippy::cargo
+)]
+#[rustfmt::skip]
+mod bindings;
+mod bindings_impl;
+#[cfg(test)]
+mod bindings_tests;
+mod events;
+
+/// Windows types used by the public capture and encoding APIs.
+pub mod interop;
+
 /// Exported for the trait bounds
-pub use windows::Graphics::Capture::GraphicsCaptureItem;
+pub use crate::bindings::GraphicsCaptureItem;
 
 /// Contains safe wrapper for WinRT initialization.
 pub(crate) mod winrt;

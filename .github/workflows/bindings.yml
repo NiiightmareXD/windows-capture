@@ -1,0 +1,28 @@
+name: Windows bindings
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generated-bindings:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Keep rustfmt fixed so output changes reflect binding/filter changes.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+          components: rustfmt
+      - name: Verify checked-in bindings
+        run: cargo +1.98.1 run --locked --manifest-path tools/bindings/Cargo.toml -- --check
+      - name: Check library, examples, and Python wrapper
+        run: cargo +1.98.1 check --locked --workspace --all-targets
+      - name: Test Windows ABI and runtime interop
+        run: cargo +1.98.1 test --locked -p windows-capture

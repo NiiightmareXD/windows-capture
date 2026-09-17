@@ -1,0 +1,10 @@
+[package]
+name = "generate-bindings"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+windows-bindgen = "=0.100.0"
+
+[workspace]

@@ -1,35 +1,29 @@
 //! Utilities for querying and working with display monitors.
 //!
-//! Provides [`Monitor`] for retrieving monitor metadata such as friendly name,
+//! Provides [`crate::monitor::Monitor`] for retrieving monitor metadata such as friendly name,
 //! device name, resolution, refresh rate, and converting a monitor into a capture item.
 //!
 //! Common tasks include:
-//! - Enumerating monitors via [`Monitor::enumerate`].
-//! - Selecting by one-based index via [`Monitor::from_index`].
-//! - Getting the primary monitor via [`Monitor::primary`].
+//! - Enumerating monitors via [`crate::monitor::Monitor::enumerate`].
+//! - Selecting by one-based index via [`crate::monitor::Monitor::from_index`].
+//! - Getting the primary monitor via [`crate::monitor::Monitor::primary`].
 //!
 //! To acquire a [`crate::GraphicsCaptureItem`] for a monitor, use the implementation of
-//! [`crate::settings::TryIntoCaptureItemWithDetails`] for [`Monitor`].
+//! `TryInto<GraphicsCaptureItemType>` for [`crate::monitor::Monitor`].
 use std::mem;
 use std::num::ParseIntError;
 use std::string::FromUtf16Error;
 
-use windows::Graphics::Capture::GraphicsCaptureItem;
-use windows::Win32::Devices::Display::{
-    DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+use crate::bindings::{
+    DEVMODEW, DISPLAY_DEVICEW, DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
     DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO,
     DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME_FLAGS,
-    DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY, DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes,
-    QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
+    DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY, DisplayConfigGetDeviceInfo, ENUM_CURRENT_SETTINGS, EnumDisplayDevicesW,
+    EnumDisplayMonitors, EnumDisplaySettingsW, GetDisplayConfigBufferSizes, GetMonitorInfoW, GraphicsCaptureItem, HDC,
+    HMONITOR, IGraphicsCaptureItemInterop, LPARAM, MONITOR_DEFAULTTONULL, MONITORINFO, MONITORINFOEXW,
+    MonitorFromPoint, POINT, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig, RECT,
 };
-use windows::Win32::Foundation::{LPARAM, POINT, RECT, TRUE};
-use windows::Win32::Graphics::Gdi::{
-    DEVMODEW, DISPLAY_DEVICE_STATE_FLAGS, DISPLAY_DEVICEW, ENUM_CURRENT_SETTINGS, EnumDisplayDevicesW,
-    EnumDisplayMonitors, EnumDisplaySettingsW, GetMonitorInfoW, HDC, HMONITOR, MONITOR_DEFAULTTONULL, MONITORINFO,
-    MONITORINFOEXW, MonitorFromPoint,
-};
-use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
-use windows::core::{BOOL, HSTRING, PCWSTR};
+use windows_core::{BOOL, HSTRING, PCWSTR};
 
 use crate::settings::GraphicsCaptureItemType;
 
@@ -38,7 +32,7 @@ use crate::settings::GraphicsCaptureItemType;
 pub enum Error {
     /// No monitor matched the query.
     ///
-    /// Returned by methods like [`Monitor::primary`] or [`Monitor::from_index`] when no monitor
+    /// Returned by methods like [`crate::monitor::Monitor::primary`] or [`crate::monitor::Monitor::from_index`] when no monitor
     /// is found.
     #[error("Failed to find the specified monitor.")]
     NotFound,
@@ -69,9 +63,9 @@ pub enum Error {
     FailedToConvertWindowsString(#[from] FromUtf16Error),
     /// A Windows Runtime/Win32 API call failed.
     ///
-    /// Wraps [`windows::core::Error`].
+    /// Wraps [`windows_core::Error`].
     #[error("A Windows API call failed: {0}")]
-    WindowsError(#[from] windows::core::Error),
+    WindowsError(#[from] windows_core::Error),
 }
 
 /// Represents a display monitor.
@@ -103,7 +97,7 @@ pub enum Error {
 /// println!("Second monitor size: {}x{}", m2.width().unwrap(), m2.height().unwrap());
 /// ```
 ///
-/// See also: [`crate::settings::TryIntoCaptureItemWithDetails`].
+/// See also: `TryInto<GraphicsCaptureItemType>`.
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub struct Monitor {
     monitor: HMONITOR,
@@ -120,9 +114,9 @@ impl Monitor {
     #[inline]
     pub fn primary() -> Result<Self, Error> {
         let point = POINT { x: 0, y: 0 };
-        let monitor = unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTONULL) };
+        let monitor = unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTONULL as u32) };
 
-        if monitor.is_invalid() {
+        if monitor.0.is_null() {
             return Err(Error::NotFound);
         }
 
@@ -178,21 +172,26 @@ impl Monitor {
         let mut number_of_paths = 0;
         let mut number_of_modes = 0;
         unsafe {
-            GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut number_of_paths, &mut number_of_modes).ok()?;
+            windows_core::WIN32_ERROR(GetDisplayConfigBufferSizes(
+                QDC_ONLY_ACTIVE_PATHS as u32,
+                &mut number_of_paths,
+                &mut number_of_modes,
+            ) as u32)
+            .ok()?;
         };
 
         let mut paths = vec![DISPLAYCONFIG_PATH_INFO::default(); number_of_paths as usize];
         let mut modes = vec![DISPLAYCONFIG_MODE_INFO::default(); number_of_modes as usize];
-        unsafe {
+        windows_core::WIN32_ERROR(unsafe {
             QueryDisplayConfig(
-                QDC_ONLY_ACTIVE_PATHS,
+                QDC_ONLY_ACTIVE_PATHS as u32,
                 &mut number_of_paths,
                 paths.as_mut_ptr(),
                 &mut number_of_modes,
                 modes.as_mut_ptr(),
-                None,
+                std::ptr::null_mut(),
             )
-        }
+        } as u32)
         .ok()?;
 
         for path in &paths {
@@ -264,7 +263,7 @@ impl Monitor {
     #[inline]
     pub fn device_name(&self) -> Result<String, Error> {
         let mut monitor_info = MONITORINFOEXW {
-            monitorInfo: MONITORINFO {
+            Base: MONITORINFO {
                 cbSize: u32::try_from(mem::size_of::<MONITORINFOEXW>()).unwrap(),
                 rcMonitor: RECT::default(),
                 rcWork: RECT::default(),
@@ -294,7 +293,7 @@ impl Monitor {
     #[inline]
     pub fn device_string(&self) -> Result<String, Error> {
         let mut monitor_info = MONITORINFOEXW {
-            monitorInfo: MONITORINFO {
+            Base: MONITORINFO {
                 cbSize: u32::try_from(mem::size_of::<MONITORINFOEXW>()).unwrap(),
                 rcMonitor: RECT::default(),
                 rcWork: RECT::default(),
@@ -310,7 +309,7 @@ impl Monitor {
             cb: u32::try_from(mem::size_of::<DISPLAY_DEVICEW>()).unwrap(),
             DeviceName: [0; 32],
             DeviceString: [0; 128],
-            StateFlags: DISPLAY_DEVICE_STATE_FLAGS::default(),
+            StateFlags: 0,
             DeviceID: [0; 128],
             DeviceKey: [0; 128],
         };
@@ -412,7 +411,7 @@ impl Monitor {
         Ok(monitors)
     }
 
-    /// Constructs a `Monitor` instance from a raw `HMONITOR` handle.
+    /// Constructs a `crate::monitor::Monitor` instance from a raw `HMONITOR` handle.
     #[inline]
     #[must_use]
     pub const fn from_raw_hmonitor(monitor: *mut std::ffi::c_void) -> Self {
@@ -433,18 +432,18 @@ impl Monitor {
 
         monitors.push(Self { monitor });
 
-        TRUE
+        BOOL(1)
     }
 }
 
 impl TryInto<GraphicsCaptureItemType> for Monitor {
-    type Error = windows::core::Error;
+    type Error = windows_core::Error;
 
     #[inline]
     fn try_into(self) -> Result<GraphicsCaptureItemType, Self::Error> {
         let monitor = HMONITOR(self.as_raw_hmonitor());
 
-        let interop = windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
+        let interop = windows_core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
         let item = unsafe { interop.CreateForMonitor(monitor)? };
 
         Ok(GraphicsCaptureItemType::Monitor((item, self)))

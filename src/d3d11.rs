@@ -1,20 +1,14 @@
 use std::slice;
 
-use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
-use windows::Win32::Foundation::HMODULE;
-use windows::Win32::Graphics::Direct3D::{
-    D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_9_1, D3D_FEATURE_LEVEL_9_2, D3D_FEATURE_LEVEL_9_3,
-    D3D_FEATURE_LEVEL_10_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
+use crate::bindings::{
+    CreateDirect3D11DeviceFromDXGIDevice, D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_9_1,
+    D3D_FEATURE_LEVEL_9_2, D3D_FEATURE_LEVEL_9_3, D3D_FEATURE_LEVEL_10_0, D3D_FEATURE_LEVEL_10_1,
+    D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1, D3D11_CPU_ACCESS_READ, D3D11_CPU_ACCESS_WRITE,
+    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ_WRITE, D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION,
+    D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, D3D11CreateDevice, DXGI_FORMAT, DXGI_SAMPLE_DESC, HMODULE, ID3D11Device,
+    ID3D11DeviceContext, ID3D11Texture2D, IDXGIDevice, IDirect3DDevice,
 };
-use windows::Win32::Graphics::Direct3D11::{
-    D3D11_CPU_ACCESS_READ, D3D11_CPU_ACCESS_WRITE, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ_WRITE,
-    D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, D3D11CreateDevice,
-    ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
-};
-use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT, DXGI_SAMPLE_DESC};
-use windows::Win32::Graphics::Dxgi::IDXGIDevice;
-use windows::Win32::System::WinRT::Direct3D11::CreateDirect3D11DeviceFromDXGIDevice;
-use windows::core::Interface;
+use windows_core::Interface;
 
 #[derive(thiserror::Error, Eq, PartialEq, Clone, Debug)]
 /// Errors that can occur when creating or working with Direct3D devices and textures.
@@ -27,9 +21,9 @@ pub enum Error {
     UnexpectedNullResult(&'static str),
     /// A Windows Runtime/Win32 API call failed.
     ///
-    /// Wraps [`windows::core::Error`].
+    /// Wraps [`windows_core::Error`].
     #[error("Windows API Error: {0}")]
-    WindowsError(#[from] windows::core::Error),
+    WindowsError(#[from] windows_core::Error),
 }
 
 /// A wrapper to send a DirectX device across threads.
@@ -77,7 +71,7 @@ pub(crate) struct MappedStagingTexture<'a> {
 
 impl<'a> MappedStagingTexture<'a> {
     /// Maps an owned staging texture.
-    pub fn map_owned(context: &'a ID3D11DeviceContext, texture: StagingTexture) -> Result<Self, windows::core::Error> {
+    pub fn map_owned(context: &'a ID3D11DeviceContext, texture: StagingTexture) -> Result<Self, windows_core::Error> {
         Self::map(context, StagingTextureHandle::Owned(texture))
     }
 
@@ -85,7 +79,7 @@ impl<'a> MappedStagingTexture<'a> {
     pub fn map_borrowed(
         context: &'a ID3D11DeviceContext,
         texture: &'a mut StagingTexture,
-    ) -> Result<Self, windows::core::Error> {
+    ) -> Result<Self, windows_core::Error> {
         unmap_staging_texture(context, texture);
         Self::map(context, StagingTextureHandle::Borrowed(texture))
     }
@@ -93,10 +87,10 @@ impl<'a> MappedStagingTexture<'a> {
     fn map(
         context: &'a ID3D11DeviceContext,
         mut texture: StagingTextureHandle<'a>,
-    ) -> Result<Self, windows::core::Error> {
+    ) -> Result<Self, windows_core::Error> {
         let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
         unsafe {
-            context.Map(texture.texture(), 0, D3D11_MAP_READ_WRITE, 0, Some(&mut mapped))?;
+            context.Map(texture.texture(), 0, D3D11_MAP_READ_WRITE, 0, Some(&mut mapped)).ok()?;
         }
         texture.set_mapped(true);
 
@@ -149,8 +143,8 @@ pub(crate) fn unmap_staging_texture(context: &ID3D11DeviceContext, texture: &mut
     }
 }
 
-/// Creates an [`windows::Win32::Graphics::Direct3D11::ID3D11Device`] and an
-/// [`windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext`].
+/// Creates an [`crate::interop::ID3D11Device`] and an
+/// [`crate::interop::ID3D11DeviceContext`].
 ///
 /// # Errors
 ///
@@ -181,16 +175,17 @@ pub fn create_d3d_device() -> Result<(ID3D11Device, ID3D11DeviceContext), Error>
             None,
             D3D_DRIVER_TYPE_HARDWARE,
             HMODULE::default(),
-            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT as u32,
             Some(&feature_flags),
-            D3D11_SDK_VERSION,
+            D3D11_SDK_VERSION as u32,
             Some(&mut d3d_device),
             Some(&mut feature_level),
             Some(&mut d3d_device_context),
-        )?;
+        )
+        .ok()?;
     };
 
-    if feature_level.0 < D3D_FEATURE_LEVEL_11_0.0 {
+    if feature_level < D3D_FEATURE_LEVEL_11_0 {
         return Err(Error::FeatureLevelNotSatisfied);
     }
 
@@ -200,8 +195,8 @@ pub fn create_d3d_device() -> Result<(ID3D11Device, ID3D11DeviceContext), Error>
     Ok((d3d_device, d3d_device_context))
 }
 
-/// Creates an [`windows::Graphics::DirectX::Direct3D11::IDirect3DDevice`] from an
-/// [`windows::Win32::Graphics::Direct3D11::ID3D11Device`].
+/// Creates an [`crate::interop::IDirect3DDevice`] from an
+/// [`crate::interop::ID3D11Device`].
 ///
 /// # Errors
 ///
@@ -234,20 +229,20 @@ impl StagingTexture {
             SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
             Usage: D3D11_USAGE_STAGING,
             BindFlags: 0,
-            CPUAccessFlags: (D3D11_CPU_ACCESS_READ.0 | D3D11_CPU_ACCESS_WRITE.0) as u32,
+            CPUAccessFlags: (D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE) as u32,
             MiscFlags: 0,
         };
 
         let mut tex = None;
         unsafe {
-            device.CreateTexture2D(&desc, None, Some(&mut tex))?;
+            device.CreateTexture2D(&desc, None, Some(&mut tex)).ok()?;
         }
         let inner = tex.ok_or(Error::UnexpectedNullResult("an `ID3D11Texture2D`"))?;
 
         Ok(Self { inner, desc, is_mapped: false })
     }
 
-    /// Gets the underlying [`windows::Win32::Graphics::Direct3D11::ID3D11Texture2D`].
+    /// Gets the underlying [`crate::interop::ID3D11Texture2D`].
     #[inline]
     #[must_use]
     pub const fn texture(&self) -> &ID3D11Texture2D {
@@ -281,7 +276,7 @@ impl StagingTexture {
         let mut desc = D3D11_TEXTURE2D_DESC::default();
         unsafe { tex.GetDesc(&mut desc) };
         let is_staging = desc.Usage == D3D11_USAGE_STAGING;
-        let cpu_rw_mask = (D3D11_CPU_ACCESS_READ.0 | D3D11_CPU_ACCESS_WRITE.0) as u32;
+        let cpu_rw_mask = (D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE) as u32;
         let has_cpu_rw = (desc.CPUAccessFlags & cpu_rw_mask) == cpu_rw_mask;
 
         if !is_staging || !has_cpu_rw {

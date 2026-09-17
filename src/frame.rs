@@ -2,13 +2,12 @@ use std::fs::{self};
 use std::path::Path;
 use std::{io, ptr};
 
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use windows::Foundation::TimeSpan;
-use windows::Graphics::Capture::Direct3D11CaptureFrame;
-use windows::Graphics::DirectX::Direct3D11::IDirect3DSurface;
-use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BOX, D3D11_TEXTURE2D_DESC, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+use crate::bindings::{
+    D3D11_BOX, D3D11_TEXTURE2D_DESC, Direct3D11CaptureFrame, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+    IDirect3DSurface,
 };
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use windows_time::TimeSpan;
 
 use crate::d3d11::{MappedStagingTexture, StagingTexture};
 use crate::encoder::{self, ImageEncoder, ImageEncoderError, ImageEncoderPixelFormat, ImageFormat};
@@ -41,9 +40,9 @@ pub enum Error {
     IoError(#[from] io::Error),
     /// A Windows API call failed.
     ///
-    /// Wraps [`windows::core::Error`].
+    /// Wraps [`windows_core::Error`].
     #[error("Windows API error: {0}")]
-    WindowsError(#[from] windows::core::Error),
+    WindowsError(#[from] windows_core::Error),
 }
 
 /// Represents a rectangular dirty region within a frame.
@@ -104,7 +103,7 @@ impl<'a> Frame<'a> {
     }
     /// Gets the dirty regions of the frame.
     #[inline]
-    pub fn dirty_regions(&self) -> Result<Vec<DirtyRegion>, windows::core::Error> {
+    pub fn dirty_regions(&self) -> Result<Vec<DirtyRegion>, windows_core::Error> {
         Ok(self
             .capture_frame
             .DirtyRegions()?
@@ -122,7 +121,7 @@ impl<'a> Frame<'a> {
 
     /// Gets the timestamp of the frame.
     #[inline]
-    pub fn timestamp(&self) -> Result<TimeSpan, windows::core::Error> {
+    pub fn timestamp(&self) -> Result<TimeSpan, windows_core::Error> {
         self.capture_frame.SystemRelativeTime()
     }
 

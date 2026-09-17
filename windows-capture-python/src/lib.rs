@@ -14,6 +14,12 @@ use ::windows_capture::d3d11::{self, StagingTexture};
 use ::windows_capture::dxgi_duplication_api::{DxgiDuplicationApi, Error as DxgiDuplicationError};
 use ::windows_capture::frame::Frame;
 use ::windows_capture::graphics_capture_api::InternalCaptureControl;
+use ::windows_capture::interop::{
+    D3D11_MAP_READ_WRITE, D3D11_MAPPED_SUBRESOURCE, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+};
+use ::windows_capture::interop::{
+    DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT,
+};
 use ::windows_capture::monitor::Monitor;
 use ::windows_capture::settings::{
     ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings, GraphicsCaptureItemType,
@@ -23,12 +29,6 @@ use ::windows_capture::window::Window;
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyMemoryView, PyModule};
-use windows::Win32::Graphics::Direct3D11::{
-    D3D11_MAP_READ_WRITE, D3D11_MAPPED_SUBRESOURCE, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
-};
-use windows::Win32::Graphics::Dxgi::Common::{
-    DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT,
-};
 
 type PythonCaptureCallbacks = (Arc<Py<PyAny>>, Arc<Py<PyAny>>);
 
@@ -416,7 +416,7 @@ pub enum NativeMappedFrameError {
     #[error("Failed to create a staging texture: {0}")]
     StagingTexture(#[from] d3d11::Error),
     #[error("Failed to map the staging texture: {0}")]
-    Map(#[source] windows::core::Error),
+    Map(#[source] windows_core::Error),
     #[error("The mapped staging texture returned a null data pointer")]
     NullDataPointer,
     #[error("The mapped frame size overflowed usize")]
@@ -456,6 +456,7 @@ impl NativeMappedFrame {
                 context_guard.CopyResource(staging.texture(), texture);
                 context_guard
                     .Map(staging.texture(), 0, D3D11_MAP_READ_WRITE, 0, Some(&mut mapped))
+                    .ok()
                     .map_err(NativeMappedFrameError::Map)?;
             }
         }
@@ -582,7 +583,7 @@ pub enum InnerNativeWindowsCaptureError {
     #[error("Mapped frame error: {0}")]
     MappedFrameError(#[from] NativeMappedFrameError),
     #[error("Windows API error: {0}")]
-    WindowsApiError(windows::core::Error),
+    WindowsApiError(windows_core::Error),
 }
 
 impl GraphicsCaptureApiHandler for InnerNativeWindowsCapture {
@@ -602,7 +603,7 @@ impl GraphicsCaptureApiHandler for InnerNativeWindowsCapture {
     ) -> Result<(), Self::Error> {
         let width = frame.width();
         let height = frame.height();
-        let timestamp = frame.timestamp().map_err(InnerNativeWindowsCaptureError::WindowsApiError)?.Duration;
+        let timestamp = frame.timestamp().map_err(InnerNativeWindowsCaptureError::WindowsApiError)?.duration;
         let context = self.context.get_or_insert_with(|| Arc::new(Mutex::new(frame.device_context().clone()))).clone();
         let mapped_frame = NativeMappedFrame::map_texture(
             frame.device(),

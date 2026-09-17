@@ -1,6 +1,6 @@
 //! DXGI Desktop Duplication API wrapper.
 //!
-//! This module provides [`DxgiDuplicationApi`] to capture a monitor using the
+//! This module provides [`crate::dxgi_duplication_api::DxgiDuplicationApi`] to capture a monitor using the
 //! Windows DXGI Desktop Duplication API. It integrates with [`crate::monitor::Monitor`]
 //! to select the target output and exposes CPU-readable frames via [`crate::frame::FrameBuffer`].
 //!
@@ -29,20 +29,15 @@
 use std::path::Path;
 use std::{fs, io};
 
+use crate::bindings::{
+    D3D11_BOX, D3D11_TEXTURE2D_DESC, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, DXGI_ERROR_ACCESS_LOST,
+    DXGI_ERROR_NOT_FOUND, DXGI_ERROR_WAIT_TIMEOUT, DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM,
+    DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_OUTDUPL_DESC, DXGI_OUTDUPL_FRAME_INFO, E_ACCESSDENIED, ID3D11Device,
+    ID3D11DeviceContext, ID3D11Texture2D, IDXGIDevice4, IDXGIOutput6, IDXGIOutputDuplication,
+    SetProcessDpiAwarenessContext,
+};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use windows::Win32::Foundation::E_ACCESSDENIED;
-use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BOX, D3D11_TEXTURE2D_DESC, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
-};
-use windows::Win32::Graphics::Dxgi::Common::{
-    DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT,
-};
-use windows::Win32::Graphics::Dxgi::{
-    DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_NOT_FOUND, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_DESC, DXGI_OUTDUPL_FRAME_INFO,
-    IDXGIDevice4, IDXGIOutput6, IDXGIOutputDuplication,
-};
-use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
-use windows::core::Interface;
+use windows_core::Interface;
 
 use crate::d3d11::{MappedStagingTexture, StagingTexture, create_d3d_device, unmap_staging_texture};
 use crate::encoder::{ImageEncoder, ImageEncoderError, ImageEncoderPixelFormat, ImageFormat};
@@ -84,7 +79,7 @@ pub enum Error {
     IoError(#[from] io::Error),
     /// Windows API error.
     #[error("Windows API error: {0}")]
-    WindowsError(#[from] windows::core::Error),
+    WindowsError(#[from] windows_core::Error),
 }
 
 /// Supported DXGI formats for duplication.
@@ -123,7 +118,7 @@ pub struct DxgiDuplicationApi {
 }
 
 fn enable_per_monitor_dpi_awareness() -> Result<(), Error> {
-    match unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) } {
+    match unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).ok() } {
         Ok(()) => Ok(()),
         Err(error) if error.code() == E_ACCESSDENIED => Ok(()),
         Err(error) => Err(Error::WindowsError(error)),
@@ -135,9 +130,12 @@ fn find_output_for_monitor(dxgi_device: &IDXGIDevice4, monitor: Monitor) -> Resu
     let mut index = 0u32;
 
     loop {
-        match unsafe { adapter.EnumOutputs(index) } {
-            Ok(output) => {
-                let desc = unsafe { output.GetDesc()? };
+        let mut output = None;
+        match unsafe { adapter.EnumOutputs(index, &mut output).ok() } {
+            Ok(()) => {
+                let output = output.ok_or(Error::OutputNotFound)?;
+                let mut desc = crate::bindings::DXGI_OUTPUT_DESC::default();
+                unsafe { output.GetDesc(&mut desc).ok()? };
                 if desc.Monitor.0 == monitor.as_raw_hmonitor() {
                     return Ok(output.cast::<IDXGIOutput6>()?);
                 }
@@ -172,7 +170,7 @@ impl DxgiDuplicationApi {
             return Ok(());
         }
 
-        match unsafe { self.duplication.ReleaseFrame() } {
+        match unsafe { self.duplication.ReleaseFrame().ok() } {
             Ok(()) => {
                 self.is_holding_frame = false;
                 Ok(())
@@ -195,7 +193,8 @@ impl DxgiDuplicationApi {
         drop(self);
 
         let duplication = unsafe { output.DuplicateOutput1(&d3d_device, 0, supported_formats)? };
-        let duplication_desc = unsafe { duplication.GetDesc() };
+        let mut duplication_desc = DXGI_OUTDUPL_DESC::default();
+        unsafe { duplication.GetDesc(&mut duplication_desc) };
 
         Ok(Self {
             d3d_device,
@@ -224,7 +223,8 @@ impl DxgiDuplicationApi {
         let duplication = unsafe { output.DuplicateOutput1(&d3d_device, 0, &DEFAULT_DUPLICATION_FORMATS)? };
 
         // Get the duplication description to determine the format for our internal texture.
-        let duplication_desc = unsafe { duplication.GetDesc() };
+        let mut duplication_desc = DXGI_OUTDUPL_DESC::default();
+        unsafe { duplication.GetDesc(&mut duplication_desc) };
 
         Ok(Self {
             d3d_device,
@@ -255,7 +255,8 @@ impl DxgiDuplicationApi {
         let duplication = unsafe { output.DuplicateOutput1(&d3d_device, 0, &supported_formats)? };
 
         // Get the duplication description to determine the format for our internal texture.
-        let duplication_desc = unsafe { duplication.GetDesc() };
+        let mut duplication_desc = DXGI_OUTDUPL_DESC::default();
+        unsafe { duplication.GetDesc(&mut duplication_desc) };
 
         Ok(Self {
             d3d_device,
@@ -269,20 +270,20 @@ impl DxgiDuplicationApi {
     }
 
     /// Recreates the duplication interface, mostly used after receiving an [`Error::AccessLost`]
-    /// error from [`DxgiDuplicationApi::acquire_next_frame`].
+    /// error from [`crate::dxgi_duplication_api::DxgiDuplicationApi::acquire_next_frame`].
     pub fn recreate(self) -> Result<Self, Error> {
         self.recreate_with_formats(&DEFAULT_DUPLICATION_FORMATS)
     }
 
     /// Recreates the duplication interface with a custom list of supported DXGI formats, mostly
     /// used after receiving an [`Error::AccessLost`] error from
-    /// [`DxgiDuplicationApi::acquire_next_frame`].
+    /// [`crate::dxgi_duplication_api::DxgiDuplicationApi::acquire_next_frame`].
     pub fn recreate_options(self, supported_formats: &[DxgiDuplicationFormat]) -> Result<Self, Error> {
         let supported_formats = map_supported_formats(supported_formats);
         self.recreate_with_formats(&supported_formats)
     }
 
-    /// Gets the underlying [`windows::Win32::Graphics::Direct3D11::ID3D11Device`] associated with
+    /// Gets the underlying [`crate::interop::ID3D11Device`] associated with
     /// this object.
     #[inline]
     #[must_use]
@@ -290,7 +291,7 @@ impl DxgiDuplicationApi {
         &self.d3d_device
     }
 
-    /// Gets the underlying [`windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext`] used for
+    /// Gets the underlying [`crate::interop::ID3D11DeviceContext`] used for
     /// GPU operations.
     #[inline]
     #[must_use]
@@ -298,28 +299,28 @@ impl DxgiDuplicationApi {
         &self.d3d_device_context
     }
 
-    /// Gets the underlying [`windows::Win32::Graphics::Dxgi::IDXGIOutputDuplication`] interface.
+    /// Gets the underlying [`crate::interop::IDXGIOutputDuplication`] interface.
     #[inline]
     #[must_use]
     pub const fn duplication(&self) -> &IDXGIOutputDuplication {
         &self.duplication
     }
 
-    /// Gets the [`windows::Win32::Graphics::Dxgi::DXGI_OUTDUPL_DESC`] of the duplication.
+    /// Gets the [`crate::interop::DXGI_OUTDUPL_DESC`] of the duplication.
     #[inline]
     #[must_use]
     pub const fn duplication_desc(&self) -> &DXGI_OUTDUPL_DESC {
         &self.duplication_desc
     }
 
-    /// Gets the underlying [`windows::Win32::Graphics::Dxgi::IDXGIDevice4`] interface.
+    /// Gets the underlying [`crate::interop::IDXGIDevice4`] interface.
     #[inline]
     #[must_use]
     pub const fn dxgi_device(&self) -> &IDXGIDevice4 {
         &self.dxgi_device
     }
 
-    /// Gets the underlying [`windows::Win32::Graphics::Dxgi::IDXGIOutput6`] interface.
+    /// Gets the underlying [`crate::interop::IDXGIOutput6`] interface.
     #[inline]
     #[must_use]
     pub const fn output(&self) -> &IDXGIOutput6 {
@@ -387,7 +388,7 @@ impl DxgiDuplicationApi {
         self.release_frame_if_needed()?;
 
         // Acquire frame
-        match unsafe { self.duplication.AcquireNextFrame(timeout_ms, &mut frame_info, &mut resource) } {
+        match unsafe { self.duplication.AcquireNextFrame(timeout_ms, &mut frame_info, &mut resource).ok() } {
             Ok(()) => (),
             Err(e) => {
                 if e.code() == DXGI_ERROR_WAIT_TIMEOUT {
@@ -487,14 +488,14 @@ impl<'a> DxgiDuplicationFrame<'a> {
         self.duplication
     }
 
-    /// Gets the underlying [`windows::Win32::Graphics::Direct3D11::ID3D11Texture2D`] interface.
+    /// Gets the underlying [`crate::interop::ID3D11Texture2D`] interface.
     #[inline]
     #[must_use]
     pub const fn texture(&self) -> &ID3D11Texture2D {
         &self.texture
     }
 
-    /// Gets the [`windows::Win32::Graphics::Direct3D11::D3D11_TEXTURE2D_DESC`] of the underlying
+    /// Gets the [`crate::interop::D3D11_TEXTURE2D_DESC`] of the underlying
     /// texture.
     #[inline]
     #[must_use]

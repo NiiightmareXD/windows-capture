@@ -1,19 +1,13 @@
 use std::sync::Arc;
 use std::sync::atomic::{self, AtomicBool, AtomicI32};
 
-use parking_lot::Mutex;
-use windows::Foundation::Metadata::ApiInformation;
-use windows::Foundation::TypedEventHandler;
-use windows::Graphics::Capture::{
-    Direct3D11CaptureFramePool, GraphicsCaptureDirtyRegionMode, GraphicsCaptureItem, GraphicsCaptureSession,
+use crate::bindings::{
+    ApiInformation, D3D11_TEXTURE2D_DESC, Direct3D11CaptureFramePool, DirectXPixelFormat,
+    GraphicsCaptureDirtyRegionMode, GraphicsCaptureSession, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+    IDirect3DDevice, IDirect3DDxgiInterfaceAccess, LPARAM, PostThreadMessageW, WM_QUIT, WPARAM,
 };
-use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
-use windows::Graphics::DirectX::DirectXPixelFormat;
-use windows::Win32::Foundation::{LPARAM, WPARAM};
-use windows::Win32::Graphics::Direct3D11::{D3D11_TEXTURE2D_DESC, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D};
-use windows::Win32::System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess;
-use windows::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
-use windows::core::{HSTRING, IInspectable, Interface};
+use parking_lot::Mutex;
+use windows_core::{HSTRING, Interface};
 
 use crate::capture::GraphicsCaptureApiHandler;
 use crate::d3d11::{self, SendDirectX, create_direct3d_device};
@@ -59,9 +53,9 @@ pub enum Error {
     WindowError(#[from] crate::window::Error),
     /// A Windows Runtime/Win32 API call failed.
     ///
-    /// Wraps [`windows::core::Error`].
+    /// Wraps [`windows_core::Error`].
     #[error("Windows API error: {0}")]
-    WindowsError(#[from] windows::core::Error),
+    WindowsError(#[from] windows_core::Error),
 }
 
 /// Provides a way to gracefully stop the capture session thread.
@@ -86,12 +80,12 @@ impl InternalCaptureControl {
 
 /// Manages a graphics capture session using the Windows Graphics Capture API.
 pub struct GraphicsCaptureApi {
-    /// The [`windows::Graphics::Capture::GraphicsCaptureItem`] to be captured (e.g., a window or
+    /// The [`crate::interop::GraphicsCaptureItem`] to be captured (e.g., a window or
     /// monitor).
-    item_with_details: GraphicsCaptureItemType,
+    _item_with_details: GraphicsCaptureItemType,
     /// The Direct3D 11 device used for the capture.
     _d3d_device: ID3D11Device,
-    /// The WinRT [`windows::Graphics::DirectX::Direct3D11::IDirect3DDevice`] wrapper.
+    /// The WinRT [`crate::interop::IDirect3DDevice`] wrapper.
     _direct3d_device: IDirect3DDevice,
     /// The Direct3D 11 device context.
     _d3d_device_context: ID3D11DeviceContext,
@@ -103,10 +97,10 @@ pub struct GraphicsCaptureApi {
     halt: Arc<AtomicBool>,
     /// A flag indicating whether the capture session is currently active.
     active: bool,
-    /// The token for the `Closed` event handler.
-    capture_closed_event_token: i64,
-    /// The token for the `FrameArrived` event handler.
-    frame_arrived_event_token: i64,
+    /// The registration guard for the `Closed` event handler.
+    capture_closed_event: Option<windows_core::EventRevoker>,
+    /// The registration guard for the `FrameArrived` event handler.
+    frame_arrived_event: Option<windows_core::EventRevoker>,
 }
 
 impl GraphicsCaptureApi {
@@ -186,36 +180,32 @@ impl GraphicsCaptureApi {
         let halt = Arc::new(AtomicBool::new(false));
 
         // Set capture session closed event
-        let capture_closed_event_token =
-            item.Closed(&TypedEventHandler::<GraphicsCaptureItem, IInspectable>::new({
-                // Init
-                let callback_closed = callback.clone();
-                let halt_closed = halt.clone();
-                let result_closed = result.clone();
+        let capture_closed_event = crate::events::closed(item, {
+            // Init
+            let callback_closed = callback.clone();
+            let halt_closed = halt.clone();
+            let result_closed = result.clone();
 
-                move |_, _| {
-                    halt_closed.store(true, atomic::Ordering::Relaxed);
+            move |_, _| {
+                halt_closed.store(true, atomic::Ordering::Relaxed);
 
-                    // Notify the user that the capture session is closed.
-                    let callback_closed = callback_closed.lock().on_closed();
-                    if let Err(e) = callback_closed {
-                        *result_closed.lock() = Some(e);
-                    }
-
-                    // Stop the message loop to allow the thread to exit gracefully.
-                    unsafe {
-                        PostThreadMessageW(thread_id, WM_QUIT, WPARAM::default(), LPARAM::default())?;
-                    };
-
-                    Result::Ok(())
+                // Notify the user that the capture session is closed.
+                let callback_closed = callback_closed.lock().on_closed();
+                if let Err(e) = callback_closed {
+                    *result_closed.lock() = Some(e);
                 }
-            }))?;
+
+                // Stop the message loop to allow the thread to exit gracefully.
+                unsafe {
+                    PostThreadMessageW(thread_id, WM_QUIT as u32, WPARAM::default(), LPARAM::default()).ok()?;
+                };
+
+                Result::Ok(())
+            }
+        })?;
 
         // Set frame pool frame arrived event
-        let frame_arrived_event_token = frame_pool.FrameArrived(&TypedEventHandler::<
-            Direct3D11CaptureFramePool,
-            IInspectable,
-        >::new({
+        let frame_arrived_event = crate::events::frame_arrived(&frame_pool, {
             // Init
             let frame_pool_recreate = frame_pool.clone();
             let halt_frame_pool = halt.clone();
@@ -300,13 +290,13 @@ impl GraphicsCaptureApi {
 
                     // Stop the message loop to allow the thread to exit gracefully.
                     unsafe {
-                        PostThreadMessageW(thread_id, WM_QUIT, WPARAM::default(), LPARAM::default())?;
+                        PostThreadMessageW(thread_id, WM_QUIT as u32, WPARAM::default(), LPARAM::default()).ok()?;
                     };
                 }
 
                 Result::Ok(())
             }
-        }))?;
+        })?;
 
         if cursor_capture_settings != CursorCaptureSettings::Default {
             if Self::is_cursor_settings_supported()? {
@@ -351,7 +341,10 @@ impl GraphicsCaptureApi {
                 match minimum_update_interval_settings {
                     MinimumUpdateIntervalSettings::Default => (),
                     MinimumUpdateIntervalSettings::Custom(duration) => {
-                        session.SetMinUpdateInterval(duration.into())?;
+                        session.SetMinUpdateInterval(
+                            windows_time::TimeSpan::try_from(duration)
+                                .map_err(|_| windows_core::Error::from_hresult(crate::bindings::E_INVALIDARG))?,
+                        )?;
                     }
                 }
             } else {
@@ -376,7 +369,7 @@ impl GraphicsCaptureApi {
         }
 
         Ok(Self {
-            item_with_details,
+            _item_with_details: item_with_details,
             _d3d_device: d3d_device,
             _direct3d_device: direct3d_device,
             _d3d_device_context: d3d_device_context,
@@ -384,8 +377,8 @@ impl GraphicsCaptureApi {
             session: Some(session),
             halt,
             active: false,
-            frame_arrived_event_token,
-            capture_closed_event_token,
+            frame_arrived_event: Some(frame_arrived_event),
+            capture_closed_event: Some(capture_closed_event),
         })
     }
 
@@ -480,7 +473,7 @@ impl GraphicsCaptureApi {
 
     fn cleanup(&mut self) {
         if let Some(frame_pool) = self.frame_pool.take() {
-            let _ = frame_pool.RemoveFrameArrived(self.frame_arrived_event_token);
+            drop(self.frame_arrived_event.take());
             let _ = frame_pool.Close();
         }
 
@@ -488,13 +481,7 @@ impl GraphicsCaptureApi {
             let _ = session.Close();
         }
 
-        let item = match &self.item_with_details {
-            GraphicsCaptureItemType::Window((item, _)) => item,
-            GraphicsCaptureItemType::Monitor((item, _)) => item,
-            GraphicsCaptureItemType::Unknown((item, _)) => item,
-        };
-
-        let _ = item.RemoveClosed(self.capture_closed_event_token);
+        drop(self.capture_closed_event.take());
         self.active = false;
     }
 }

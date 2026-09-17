@@ -4,17 +4,13 @@ use std::sync::atomic::{self, AtomicBool};
 use std::sync::{Arc, mpsc};
 use std::thread::{self, JoinHandle};
 
+use crate::bindings::{
+    CreateDispatcherQueueController, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, DispatchMessageW, DispatcherQueueOptions,
+    ERROR_INVALID_THREAD_ID, GetCurrentThreadId, GetMessageW, GetThreadId, HANDLE, ID3D11Device, ID3D11DeviceContext,
+    LPARAM, MSG, PostQuitMessage, PostThreadMessageW, TranslateMessage, WM_QUIT, WPARAM,
+};
 use parking_lot::Mutex;
-use windows::Win32::Foundation::{ERROR_INVALID_THREAD_ID, HANDLE, LPARAM, WPARAM};
-use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext};
-use windows::Win32::System::Threading::{GetCurrentThreadId, GetThreadId};
-use windows::Win32::System::WinRT::{
-    CreateDispatcherQueueController, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, DispatcherQueueOptions,
-};
-use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, MSG, PostQuitMessage, PostThreadMessageW, TranslateMessage, WM_QUIT,
-};
-use windows::core::Result as WindowsResult;
+use windows_core::Result as WindowsResult;
 use windows_future::AsyncActionCompletedHandler;
 
 use crate::d3d11::{self, create_d3d_device};
@@ -186,14 +182,16 @@ impl<T: GraphicsCaptureApiHandler + Send + 'static, E> CaptureControl<T, E> {
             }
 
             loop {
-                match unsafe { PostThreadMessageW(thread_id, WM_QUIT, WPARAM::default(), LPARAM::default()) } {
+                match unsafe {
+                    PostThreadMessageW(thread_id, WM_QUIT as u32, WPARAM::default(), LPARAM::default()).ok()
+                } {
                     Ok(()) => break,
                     Err(error) => {
                         if thread_handle.is_finished() {
                             break;
                         }
 
-                        if error.code() != windows::core::HRESULT::from_win32(ERROR_INVALID_THREAD_ID.0) {
+                        if error.code() != windows_core::WIN32_ERROR(ERROR_INVALID_THREAD_ID as u32).to_hresult() {
                             return Err(CaptureControlError::FailedToPostThreadMessage);
                         }
 
@@ -240,7 +238,7 @@ pub enum GraphicsCaptureApiError<E> {
     /// The provided item could not be converted into a `GraphicsCaptureItem`.
     ///
     /// This happens when
-    /// [`crate::settings::TryIntoCaptureItemWithDetails::try_into_capture_item_with_details`]
+    /// [`TryInto::try_into`]
     /// fails for the item passed in [`crate::settings::Settings`].
     #[error("Failed to convert item to `GraphicsCaptureItem`")]
     ItemConvertFailed,
@@ -299,6 +297,9 @@ pub trait GraphicsCaptureApiHandler: Sized {
         // Create a dispatcher queue for the current thread
         let controller = unsafe {
             CreateDispatcherQueueController(dispatcher_queue_options())
+                .and_then(|controller| {
+                    windows_core::Interface::cast::<crate::bindings::DispatcherQueueController>(&controller)
+                })
                 .map_err(|_| GraphicsCaptureApiError::FailedToCreateDispatcherQueueController)?
         };
 
@@ -381,6 +382,9 @@ pub trait GraphicsCaptureApiHandler: Sized {
             // Create a dispatcher queue for the current thread
             let controller = unsafe {
                 CreateDispatcherQueueController(dispatcher_queue_options())
+                    .and_then(|controller| {
+                        windows_core::Interface::cast::<crate::bindings::DispatcherQueueController>(&controller)
+                    })
                     .map_err(|_| GraphicsCaptureApiError::FailedToCreateDispatcherQueueController)?
             };
 
@@ -435,7 +439,7 @@ pub trait GraphicsCaptureApiHandler: Sized {
                 .map_err(|_| GraphicsCaptureApiError::FailedToShutdownDispatcherQueue)?;
 
             async_action
-                .SetCompleted(&AsyncActionCompletedHandler::new(move |_, _| -> Result<(), windows::core::Error> {
+                .SetCompleted(&AsyncActionCompletedHandler::new(move |_, _| -> Result<(), windows_core::Error> {
                     unsafe { PostQuitMessage(0) };
                     Ok(())
                 }))

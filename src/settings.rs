@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use windows::Graphics::Capture::GraphicsCaptureItem;
+use crate::bindings::GraphicsCaptureItem;
 
 use crate::graphics_capture_picker::HwndGuard;
 use crate::monitor::Monitor;

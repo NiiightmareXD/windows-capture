@@ -1,8 +1,7 @@
 use std::io::{self, Write};
 use std::time::Instant;
 
-use windows::Storage::Streams::InMemoryRandomAccessStream;
-use windows::core::Interface;
+use ::windows_capture::interop::InMemoryRandomAccessStream;
 use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::encoder::{AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder};
 use windows_capture::frame::Frame;
@@ -12,6 +11,7 @@ use windows_capture::settings::{
     ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings, MinimumUpdateIntervalSettings,
     SecondaryWindowSettings, Settings,
 };
+use windows_core::Interface;
 
 struct StreamCapture {
     encoder: Option<VideoEncoder>,
@@ -65,7 +65,7 @@ impl GraphicsCaptureApiHandler for StreamCapture {
             println!("\nCapture finished. Stream contains {size} bytes.");
 
             // Write the in-memory stream to a file as a demonstration.
-            let reader = windows::Storage::Streams::DataReader::CreateDataReader(&self.stream.GetInputStreamAt(0)?)?;
+            let reader = ::windows_capture::interop::DataReader::CreateDataReader(&self.stream.GetInputStreamAt(0)?)?;
             reader.LoadAsync(size as u32)?.join()?;
 
             let mut bytes = vec![0u8; size as usize];

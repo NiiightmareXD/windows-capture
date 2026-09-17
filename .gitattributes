@@ -1,0 +1,2 @@
+# Byte-for-byte regeneration checks must also work with core.autocrlf on Windows.
+src/bindings.rs text eol=lf
