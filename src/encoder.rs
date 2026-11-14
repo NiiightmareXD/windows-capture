@@ -6,7 +6,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use windows::Foundation::{TimeSpan, TypedEventHandler};
+use windows::Foundation::{PropertyValue, TimeSpan, TypedEventHandler};
 use windows::Graphics::DirectX::Direct3D11::IDirect3DSurface;
 use windows::Graphics::Imaging::{BitmapAlphaMode, BitmapEncoder, BitmapPixelFormat};
 use windows::Media::Core::{
@@ -28,6 +28,11 @@ use windows::Win32::Graphics::Direct3D11::{
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT, DXGI_SAMPLE_DESC};
 use windows::Win32::Graphics::Dxgi::IDXGISurface;
+use windows::Win32::Media::MediaFoundation::{
+    CODECAPI_AVEncCommonMaxBitRate, CODECAPI_AVEncCommonQuality, CODECAPI_AVEncCommonRateControlMode,
+    eAVEncCommonRateControlMode_CBR, eAVEncCommonRateControlMode_PeakConstrainedVBR,
+    eAVEncCommonRateControlMode_Quality, eAVEncCommonRateControlMode_UnconstrainedVBR,
+};
 use windows::Win32::System::WinRT::Direct3D11::CreateDirect3D11SurfaceFromDXGISurface;
 use windows::core::{HSTRING, Interface};
 
@@ -247,10 +252,34 @@ struct CachedSurface {
     render_target_view: Option<SendDirectX<ID3D11RenderTargetView>>,
 }
 
+/// Rate control mode requested from the video encoder.
+///
+/// Passed to the Media Foundation encoder as `CODECAPI_AVEncCommonRateControlMode`. When not set,
+/// the encoder's own default applies, which for the built-in and hardware H.264/HEVC encoders is
+/// constant bitrate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VideoRateControl {
+    /// Holds the output at [`VideoSettingsBuilder::bitrate`], padding when the content is simple.
+    ConstantBitrate,
+    /// Treats [`VideoSettingsBuilder::bitrate`] as an average, spending less on simple content and
+    /// more on complex content.
+    VariableBitrate,
+    /// Like [`VideoRateControl::VariableBitrate`], with `peak` as the maximum bitrate in bits per
+    /// second.
+    PeakConstrainedVariableBitrate {
+        /// Maximum bitrate in bits per second.
+        peak: u32,
+    },
+    /// Targets a constant quality from 0 (smallest) to 100 (best). The bitrate is not a target in
+    /// this mode, so the output size follows the content.
+    Quality(u32),
+}
+
 /// Builder for configuring video encoder settings.
 pub struct VideoSettingsBuilder {
     sub_type: VideoSettingsSubType,
     bitrate: u32,
+    rate_control: Option<VideoRateControl>,
     width: u32,
     height: u32,
     frame_rate: u32,
@@ -264,12 +293,14 @@ impl VideoSettingsBuilder {
     /// Defaults:
     /// - Subtype: [`VideoSettingsSubType::HEVC`]
     /// - Bitrate: 15 Mbps
+    /// - Rate control: the encoder's default
     /// - Frame rate: 60 fps
     /// - Pixel aspect ratio: 1:1
     /// - Disabled: false
     pub const fn new(width: u32, height: u32) -> Self {
         Self {
             bitrate: 15_000_000,
+            rate_control: None,
             frame_rate: 60,
             pixel_aspect_ratio: (1, 1),
             sub_type: VideoSettingsSubType::HEVC,
@@ -288,6 +319,12 @@ impl VideoSettingsBuilder {
     /// Sets target bitrate in bits per second.
     pub const fn bitrate(mut self, bitrate: u32) -> Self {
         self.bitrate = bitrate;
+        self
+    }
+
+    /// Sets the rate control mode (see [`VideoRateControl`]).
+    pub const fn rate_control(mut self, rate_control: VideoRateControl) -> Self {
+        self.rate_control = Some(rate_control);
         self
     }
 
@@ -332,6 +369,25 @@ impl VideoSettingsBuilder {
         properties.FrameRate()?.SetDenominator(1)?;
         properties.PixelAspectRatio()?.SetNumerator(self.pixel_aspect_ratio.0)?;
         properties.PixelAspectRatio()?.SetDenominator(self.pixel_aspect_ratio.1)?;
+
+        // The transcoder hands CODECAPI values in the property bag to the encoder.
+        if let Some(rate_control) = self.rate_control {
+            let bag = properties.Properties()?;
+            let mode = match rate_control {
+                VideoRateControl::ConstantBitrate => eAVEncCommonRateControlMode_CBR,
+                VideoRateControl::VariableBitrate => eAVEncCommonRateControlMode_UnconstrainedVBR,
+                VideoRateControl::PeakConstrainedVariableBitrate { peak } => {
+                    bag.Insert(CODECAPI_AVEncCommonMaxBitRate, &PropertyValue::CreateUInt32(peak)?)?;
+                    eAVEncCommonRateControlMode_PeakConstrainedVBR
+                }
+                VideoRateControl::Quality(quality) => {
+                    bag.Insert(CODECAPI_AVEncCommonQuality, &PropertyValue::CreateUInt32(quality.min(100))?)?;
+                    eAVEncCommonRateControlMode_Quality
+                }
+            };
+            bag.Insert(CODECAPI_AVEncCommonRateControlMode, &PropertyValue::CreateUInt32(mode.0 as u32)?)?;
+        }
+
         Ok((properties, self.disabled))
     }
 }
